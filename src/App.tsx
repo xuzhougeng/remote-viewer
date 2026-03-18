@@ -12,6 +12,8 @@ import type {
   ResolvedSshHost
 } from "./types";
 
+type ThemeMode = "light" | "dark";
+
 const defaultForm: ConnectionConfig = {
   authMethod: "key",
   host: "",
@@ -23,6 +25,7 @@ const defaultForm: ConnectionConfig = {
 };
 
 const passwordStoragePrefix = "remote-viewer.password.";
+const themeStorageKey = "remote-viewer.theme";
 const knownTextExtensions = new Set([
   "c",
   "cc",
@@ -185,6 +188,11 @@ function removeStoredPassword(host: string, username: string): void {
   window.localStorage.removeItem(key);
 }
 
+function readStoredTheme(): ThemeMode {
+  const storedTheme = window.localStorage.getItem(themeStorageKey);
+  return storedTheme === "dark" ? "dark" : "light";
+}
+
 function isTextLikeEntry(entry: RemoteEntry): boolean {
   if (entry.kind !== "file") {
     return false;
@@ -258,6 +266,7 @@ function formatEntrySummary(entry: RemoteEntry): string {
 
 export default function App() {
   const [form, setForm] = useState(defaultForm);
+  const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [configuredHosts, setConfiguredHosts] = useState<ConfiguredSshHost[]>([]);
   const [currentDir, setCurrentDir] = useState("");
@@ -282,6 +291,11 @@ export default function App() {
   useEffect(() => {
     void loadConfiguredHosts();
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem(themeStorageKey, theme);
+  }, [theme]);
 
   useEffect(() => {
     if (form.authMethod !== "password") {
@@ -576,16 +590,27 @@ export default function App() {
   const selectedFilePath = selectedFile ? selectedFile.path : "尚未选择文件";
 
   return (
-    <div className="shell">
+    <div className={`shell theme-${theme}`}>
       <header className="topbar">
         <div className="topbar-copy">
           <p className="eyebrow">SSH Remote Viewer</p>
             <div className="topbar-headline">
               <h1>远程文件浏览器</h1>
-              <div className="topbar-pills">
-                <span>SSH2</span>
-                <span>Key / Password</span>
-                <span>PDF · PNG · HTML · Text</span>
+              <div className="topbar-controls">
+                <div className="topbar-pills">
+                  <span>SSH2</span>
+                  <span>Key / Password</span>
+                  <span>PDF · PNG · HTML · Text</span>
+                </div>
+                <button
+                  className="theme-toggle"
+                  onClick={() =>
+                    setTheme((value) => (value === "light" ? "dark" : "light"))
+                  }
+                  type="button"
+                >
+                  {theme === "light" ? "切到深色" : "切到浅色"}
+                </button>
               </div>
             </div>
             <p className="topbar-note">

@@ -1,13 +1,102 @@
 :root {
-  color: #22343f;
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  background:
+  --app-background:
     radial-gradient(circle at top left, rgba(255, 198, 128, 0.24), transparent 24%),
     radial-gradient(circle at 88% 12%, rgba(145, 214, 224, 0.18), transparent 20%),
     linear-gradient(180deg, #f8f1e4 0%, #f7f4ec 42%, #eef5f1 100%);
+  --color-text: #22343f;
+  --color-text-strong: #20333f;
+  --color-text-muted: rgba(34, 52, 63, 0.74);
+  --color-text-soft: rgba(34, 52, 63, 0.64);
+  --color-text-faint: rgba(34, 52, 63, 0.42);
+  --color-accent: #be6d25;
+  --color-panel-bg: rgba(255, 252, 247, 0.9);
+  --color-panel-border: rgba(35, 61, 75, 0.1);
+  --color-panel-highlight: rgba(255, 255, 255, 0.92);
+  --color-panel-shadow: rgba(157, 131, 97, 0.1);
+  --color-surface-soft: rgba(243, 247, 245, 0.95);
+  --color-field-bg: rgba(255, 255, 255, 0.82);
+  --color-field-border: rgba(35, 61, 75, 0.12);
+  --color-button-bg: rgba(255, 255, 255, 0.92);
+  --color-button-hover: #ffffff;
+  --color-button-shadow: rgba(149, 125, 92, 0.12);
+  --color-config-border: rgba(136, 190, 200, 0.16);
+  --color-config-bg-top: rgba(235, 245, 243, 0.98);
+  --color-config-bg-bottom: rgba(231, 241, 239, 0.92);
+  --color-file-row-bg: rgba(255, 255, 255, 0.88);
+  --color-file-row-active-border: rgba(220, 152, 83, 0.36);
+  --color-file-row-active-bg: rgba(248, 214, 177, 0.6);
+  --color-file-icon-bg: rgba(235, 245, 243, 0.96);
+  --color-toggle-bg: rgba(156, 216, 226, 0.76);
+  --color-zoom-bg: rgba(235, 245, 243, 0.96);
+  --color-viewer-bg:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(250, 247, 242, 0.9)),
+    rgba(255, 252, 247, 0.92);
+  --color-preview-bg:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(244, 248, 246, 0.96)),
+    rgba(244, 248, 247, 0.92);
+  --color-placeholder-bg: rgba(249, 246, 239, 0.78);
+  --color-placeholder-border: rgba(35, 61, 75, 0.16);
+  --color-preview-shadow: rgba(119, 101, 73, 0.18);
+  --color-table-border: rgba(35, 61, 75, 0.08);
+  --color-table-head-bg: rgba(235, 245, 243, 0.98);
+  --color-primary-start: #de7f44;
+  --color-primary-end: #efcb7d;
+  --color-scrollbar-thumb: rgba(92, 122, 136, 0.22);
+  --color-scrollbar-thumb-hover: rgba(92, 122, 136, 0.34);
+  color: var(--color-text);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color-scheme: light;
   font-synthesis: none;
   line-height: 1.5;
   text-rendering: optimizeLegibility;
+}
+
+[data-theme="dark"] {
+  --app-background:
+    radial-gradient(circle at top left, rgba(196, 126, 64, 0.18), transparent 24%),
+    radial-gradient(circle at 88% 12%, rgba(58, 124, 140, 0.16), transparent 20%),
+    linear-gradient(180deg, #0d151b 0%, #101a21 44%, #0a1218 100%);
+  --color-text: #e3edf2;
+  --color-text-strong: #f4f8fb;
+  --color-text-muted: rgba(227, 237, 242, 0.76);
+  --color-text-soft: rgba(227, 237, 242, 0.62);
+  --color-text-faint: rgba(227, 237, 242, 0.42);
+  --color-accent: #efb36d;
+  --color-panel-bg: rgba(15, 22, 29, 0.88);
+  --color-panel-border: rgba(177, 210, 230, 0.12);
+  --color-panel-highlight: rgba(255, 255, 255, 0.05);
+  --color-panel-shadow: rgba(0, 0, 0, 0.32);
+  --color-surface-soft: rgba(18, 30, 38, 0.96);
+  --color-field-bg: rgba(16, 26, 33, 0.92);
+  --color-field-border: rgba(177, 210, 230, 0.14);
+  --color-button-bg: rgba(22, 34, 42, 0.95);
+  --color-button-hover: rgba(28, 43, 52, 0.98);
+  --color-button-shadow: rgba(0, 0, 0, 0.28);
+  --color-config-border: rgba(124, 170, 185, 0.18);
+  --color-config-bg-top: rgba(19, 33, 41, 0.98);
+  --color-config-bg-bottom: rgba(15, 27, 34, 0.96);
+  --color-file-row-bg: rgba(19, 31, 39, 0.88);
+  --color-file-row-active-border: rgba(126, 183, 198, 0.42);
+  --color-file-row-active-bg: rgba(85, 120, 132, 0.34);
+  --color-file-icon-bg: rgba(22, 38, 47, 0.98);
+  --color-toggle-bg: rgba(100, 166, 181, 0.42);
+  --color-zoom-bg: rgba(20, 36, 44, 0.96);
+  --color-viewer-bg:
+    linear-gradient(180deg, rgba(14, 22, 29, 0.96), rgba(10, 17, 23, 0.92)),
+    rgba(10, 17, 23, 0.95);
+  --color-preview-bg:
+    linear-gradient(180deg, rgba(17, 28, 36, 0.96), rgba(13, 22, 29, 0.98)),
+    rgba(13, 22, 29, 0.96);
+  --color-placeholder-bg: rgba(18, 30, 38, 0.9);
+  --color-placeholder-border: rgba(177, 210, 230, 0.16);
+  --color-preview-shadow: rgba(0, 0, 0, 0.38);
+  --color-table-border: rgba(177, 210, 230, 0.08);
+  --color-table-head-bg: rgba(22, 38, 47, 0.98);
+  --color-primary-start: #de9a56;
+  --color-primary-end: #f0c775;
+  --color-scrollbar-thumb: rgba(120, 156, 171, 0.24);
+  --color-scrollbar-thumb-hover: rgba(120, 156, 171, 0.38);
+  color-scheme: dark;
 }
 
 * {
@@ -23,6 +112,11 @@ body {
   margin: 0;
   min-height: 100vh;
   overflow: hidden;
+  background: var(--app-background);
+  color: var(--color-text);
+  transition:
+    background 180ms ease,
+    color 180ms ease;
 }
 
 body {
@@ -39,8 +133,8 @@ select {
 button {
   border: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #22343f;
+  background: var(--color-button-bg);
+  color: var(--color-text);
   cursor: pointer;
   padding: 0.68rem 0.96rem;
   white-space: nowrap;
@@ -52,8 +146,8 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #ffffff;
-  box-shadow: 0 10px 26px rgba(149, 125, 92, 0.12);
+  background: var(--color-button-hover);
+  box-shadow: 0 10px 26px var(--color-button-shadow);
   transform: translateY(-1px);
 }
 
@@ -65,15 +159,15 @@ button:disabled {
 input:not([type="checkbox"]),
 select {
   width: 100%;
-  border: 1px solid rgba(35, 61, 75, 0.12);
+  border: 1px solid var(--color-field-border);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.82);
-  color: #22343f;
+  background: var(--color-field-bg);
+  color: var(--color-text);
   padding: 0.78rem 0.92rem;
 }
 
 input::placeholder {
-  color: rgba(34, 52, 63, 0.42);
+  color: var(--color-text-faint);
 }
 
 select {
@@ -102,7 +196,7 @@ select {
 
 .eyebrow {
   margin: 0 0 0.25rem;
-  color: #be6d25;
+  color: var(--color-accent);
   font-size: 0.82rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -126,6 +220,13 @@ select {
   gap: 14px;
 }
 
+.topbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .topbar-pills {
   display: flex;
   flex-wrap: wrap;
@@ -135,12 +236,18 @@ select {
 
 .topbar-pills span {
   padding: 0.38rem 0.7rem;
-  border: 1px solid rgba(35, 61, 75, 0.08);
+  border: 1px solid var(--color-table-border);
   border-radius: 999px;
-  background: rgba(255, 252, 247, 0.78);
-  color: rgba(34, 52, 63, 0.7);
+  background: var(--color-panel-bg);
+  color: var(--color-text-muted);
   font-size: 0.78rem;
   letter-spacing: 0.04em;
+}
+
+.theme-toggle {
+  border: 1px solid var(--color-field-border);
+  background: var(--color-surface-soft);
+  font-weight: 600;
 }
 
 .topbar-note-card {
@@ -155,7 +262,7 @@ select {
 
 .topbar-note {
   margin: 0;
-  color: rgba(34, 52, 63, 0.74);
+  color: var(--color-text-muted);
   max-width: 880px;
   font-size: 0.95rem;
   line-height: 1.6;
@@ -180,12 +287,12 @@ select {
 }
 
 .panel {
-  border: 1px solid rgba(35, 61, 75, 0.1);
+  border: 1px solid var(--color-panel-border);
   border-radius: 24px;
-  background: rgba(255, 252, 247, 0.9);
+  background: var(--color-panel-bg);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.92),
-    0 18px 40px rgba(157, 131, 97, 0.1);
+    inset 0 1px 0 var(--color-panel-highlight),
+    0 18px 40px var(--color-panel-shadow);
   backdrop-filter: blur(20px);
 }
 
@@ -215,7 +322,7 @@ select {
 }
 
 .panel-subtitle {
-  color: rgba(34, 52, 63, 0.64);
+  color: var(--color-text-soft);
   font-size: 0.9rem;
   line-height: 1.5;
 }
@@ -251,7 +358,7 @@ select {
 
 .connection-panel span,
 .section-title {
-  color: rgba(35, 61, 75, 0.82);
+  color: var(--color-text-strong);
   font-size: 0.9rem;
 }
 
@@ -270,7 +377,7 @@ select {
 .panel-error,
 .config-summary,
 .session-summary {
-  color: rgba(34, 52, 63, 0.74);
+  color: var(--color-text-muted);
   font-size: 0.94rem;
 }
 
@@ -282,7 +389,7 @@ select {
   white-space: nowrap;
   padding: 0.72rem 0.9rem;
   border-radius: 16px;
-  background: rgba(243, 247, 245, 0.95);
+  background: var(--color-surface-soft);
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
   font-size: 0.84rem;
 }
@@ -293,14 +400,18 @@ select {
   flex-direction: column;
   gap: 0.24rem;
   padding: 0.9rem 1rem;
-  border: 1px solid rgba(136, 190, 200, 0.16);
+  border: 1px solid var(--color-config-border);
   border-radius: 18px;
-  background: linear-gradient(180deg, rgba(235, 245, 243, 0.98), rgba(231, 241, 239, 0.92));
+  background: linear-gradient(
+    180deg,
+    var(--color-config-bg-top),
+    var(--color-config-bg-bottom)
+  );
 }
 
 .config-summary strong,
 .session-summary strong {
-  color: #20333f;
+  color: var(--color-text-strong);
 }
 
 .config-summary small,
@@ -311,7 +422,11 @@ select {
 }
 
 .primary-button {
-  background: linear-gradient(135deg, #de7f44 0%, #efcb7d 100%);
+  background: linear-gradient(
+    135deg,
+    var(--color-primary-start) 0%,
+    var(--color-primary-end) 100%
+  );
   color: #132028;
   font-weight: 600;
 }
@@ -373,7 +488,7 @@ select {
 }
 
 .filter-count {
-  color: rgba(34, 52, 63, 0.62);
+  color: var(--color-text-soft);
   font-size: 0.84rem;
   white-space: nowrap;
 }
@@ -393,7 +508,7 @@ select {
 }
 
 .compact-checkbox {
-  color: rgba(34, 52, 63, 0.74);
+  color: var(--color-text-muted);
   font-size: 0.92rem;
 }
 
@@ -408,7 +523,7 @@ select {
   overscroll-behavior: contain;
   padding-top: 12px;
   padding-right: 4px;
-  border-top: 1px solid rgba(35, 61, 75, 0.08);
+  border-top: 1px solid var(--color-table-border);
 }
 
 .file-row {
@@ -417,15 +532,15 @@ select {
   align-items: center;
   gap: 14px;
   padding: 0.88rem 0.95rem;
-  border: 1px solid rgba(35, 61, 75, 0.08);
+  border: 1px solid var(--color-table-border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--color-file-row-bg);
   text-align: left;
 }
 
 .file-row.is-active {
-  border-color: rgba(220, 152, 83, 0.36);
-  background: rgba(248, 214, 177, 0.6);
+  border-color: var(--color-file-row-active-border);
+  background: var(--color-file-row-active-bg);
 }
 
 .file-icon {
@@ -435,7 +550,7 @@ select {
   width: 58px;
   height: 40px;
   border-radius: 14px;
-  background: rgba(235, 245, 243, 0.96);
+  background: var(--color-file-icon-bg);
   font-size: 0.85rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -466,21 +581,19 @@ select {
 .zoom-badge {
   min-width: 72px;
   border-radius: 999px;
-  background: rgba(235, 245, 243, 0.96);
+  background: var(--color-zoom-bg);
   padding: 0.64rem 0.92rem;
   text-align: center;
 }
 
 .is-toggled {
-  background: rgba(156, 216, 226, 0.76);
+  background: var(--color-toggle-bg);
 }
 
 .viewer-panel {
   flex: 1;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(250, 247, 242, 0.9)),
-    rgba(255, 252, 247, 0.92);
+  background: var(--color-viewer-bg);
 }
 
 .viewer-placeholder,
@@ -489,9 +602,9 @@ select {
   display: grid;
   place-items: center;
   min-height: 240px;
-  border: 1px dashed rgba(35, 61, 75, 0.16);
+  border: 1px dashed var(--color-placeholder-border);
   border-radius: 22px;
-  color: rgba(34, 52, 63, 0.66);
+  color: var(--color-text-soft);
   text-align: center;
   padding: 24px;
 }
@@ -499,7 +612,7 @@ select {
 .viewer-placeholder {
   width: min(100%, 540px);
   margin: auto;
-  background: rgba(249, 246, 239, 0.78);
+  background: var(--color-placeholder-bg);
 }
 
 .preview-surface {
@@ -515,9 +628,7 @@ select {
   min-height: 0;
   overflow: auto;
   border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(244, 248, 246, 0.96)),
-    rgba(244, 248, 247, 0.92);
+  background: var(--color-preview-bg);
   padding: 16px;
   display: flex;
   align-items: flex-start;
@@ -528,7 +639,7 @@ select {
 .preview-canvas {
   display: block;
   border-radius: 18px;
-  box-shadow: 0 20px 44px rgba(119, 101, 73, 0.18);
+  box-shadow: 0 20px 44px var(--color-preview-shadow);
 }
 
 .preview-image {
@@ -556,7 +667,7 @@ select {
   position: absolute;
   inset: 16px;
   z-index: 1;
-  background: rgba(249, 246, 239, 0.92);
+  background: var(--color-placeholder-bg);
 }
 
 .html-preview-frame {
@@ -564,7 +675,7 @@ select {
   border: 0;
   border-radius: 20px;
   background: #fff;
-  box-shadow: 0 20px 44px rgba(119, 101, 73, 0.18);
+  box-shadow: 0 20px 44px var(--color-preview-shadow);
   flex: 0 0 auto;
 }
 
@@ -575,7 +686,7 @@ select {
 .text-preview-content {
   width: 100%;
   margin: 0;
-  color: #22343f;
+  color: var(--color-text);
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
   line-height: 1.6;
   word-break: break-word;
@@ -596,8 +707,8 @@ select {
 .table-preview-table th,
 .table-preview-table td {
   padding: 0.78rem 0.9rem;
-  border-right: 1px solid rgba(35, 61, 75, 0.08);
-  border-bottom: 1px solid rgba(35, 61, 75, 0.08);
+  border-right: 1px solid var(--color-table-border);
+  border-bottom: 1px solid var(--color-table-border);
   text-align: left;
   vertical-align: top;
   white-space: nowrap;
@@ -606,17 +717,37 @@ select {
 .table-preview-table th {
   position: sticky;
   top: 0;
-  background: rgba(235, 245, 243, 0.98);
-  color: #20333f;
+  background: var(--color-table-head-bg);
+  color: var(--color-text-strong);
   z-index: 1;
 }
 
 .table-preview-table tr > :first-child {
-  border-left: 1px solid rgba(35, 61, 75, 0.08);
+  border-left: 1px solid var(--color-table-border);
 }
 
 .table-preview-table tr:first-child > * {
-  border-top: 1px solid rgba(35, 61, 75, 0.08);
+  border-top: 1px solid var(--color-table-border);
+}
+
+.file-list::-webkit-scrollbar,
+.preview-stage::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.file-list::-webkit-scrollbar-thumb,
+.preview-stage::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--color-scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.file-list::-webkit-scrollbar-thumb:hover,
+.preview-stage::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 
 @media (max-width: 980px) {
@@ -640,6 +771,11 @@ select {
   }
 
   .topbar-headline {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .topbar-controls {
     align-items: flex-start;
     flex-direction: column;
   }
