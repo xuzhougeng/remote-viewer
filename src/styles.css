@@ -545,6 +545,33 @@ select {
   justify-content: flex-start;
 }
 
+.html-preview-stage {
+  position: relative;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding: 16px;
+}
+
+.html-preview-loading {
+  position: absolute;
+  inset: 16px;
+  z-index: 1;
+  background: rgba(249, 246, 239, 0.92);
+}
+
+.html-preview-frame {
+  display: block;
+  border: 0;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 20px 44px rgba(119, 101, 73, 0.18);
+  flex: 0 0 auto;
+}
+
+.html-preview-frame.is-hidden {
+  visibility: hidden;
+}
+
 .text-preview-content {
   width: 100%;
   margin: 0;
