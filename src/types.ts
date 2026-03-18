@@ -57,6 +57,14 @@ export type TextPreviewPayload =
       totalSize: number;
     }
   | {
+      kind: "table";
+      notice: string;
+      previewedBytes: number;
+      rows: string[][];
+      totalSize: number;
+      truncated: boolean;
+    }
+  | {
       content: string;
       kind: "text";
       notice: string;

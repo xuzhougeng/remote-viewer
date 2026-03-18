@@ -77,6 +77,7 @@ const sessionTtlMs = 30 * 60 * 1000;
 const largeTextPreviewThresholdBytes = 10 * 1024 * 1024;
 const largeTextPreviewMaxBytes = 256 * 1024;
 const largeTextPreviewMaxLines = 120;
+const tablePreviewMaxRows = 10;
 
 class AppError extends Error {
   statusCode: number;
@@ -679,6 +680,54 @@ function takeLeadingLines(
   };
 }
 
+function splitDelimitedLine(line: string, delimiter: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+
+    if (character === '"') {
+      const nextCharacter = line[index + 1];
+
+      if (inQuotes && nextCharacter === '"') {
+        current += '"';
+        index += 1;
+        continue;
+      }
+
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (character === delimiter && !inQuotes) {
+      cells.push(current);
+      current = "";
+      continue;
+    }
+
+    current += character;
+  }
+
+  cells.push(current);
+  return cells;
+}
+
+function buildDelimitedPreview(
+  content: string,
+  delimiter: "," | "\t",
+  maxRows: number
+): { rows: string[][]; truncated: boolean } {
+  const allLines = content.replace(/\r\n/g, "\n").split("\n");
+  const previewLines = allLines.slice(0, maxRows);
+
+  return {
+    rows: previewLines.map((line) => splitDelimitedLine(line, delimiter)),
+    truncated: allLines.length > maxRows
+  };
+}
+
 function createSession(
   target: ResolvedConnectionTarget
 ): Promise<SessionRecord> {
@@ -958,6 +1007,10 @@ export function createRemoteViewerApp(
       sftp = await openSftp(session.client);
       const resolvedPath = await sftpRealpath(sftp, remotePath);
       const fileStats = await sftpStat(sftp, resolvedPath);
+      const extension = path
+        .extname(resolvedPath)
+        .toLowerCase()
+        .replace(/^\./, "");
 
       if (!fileStats.isFile()) {
         throw new AppError("目标不是可读取文件", 400);
@@ -983,6 +1036,27 @@ export function createRemoteViewerApp(
       }
 
       const rawText = previewBuffer.toString("utf8");
+
+      if (extension === "csv" || extension === "tsv") {
+        const tablePreview = buildDelimitedPreview(
+          rawText,
+          extension === "csv" ? "," : "\t",
+          tablePreviewMaxRows
+        );
+
+        response.json({
+          kind: "table",
+          notice: `${
+            extension.toUpperCase()
+          } 预览仅显示前 ${tablePreviewMaxRows} 行`,
+          previewedBytes: previewBuffer.length,
+          rows: tablePreview.rows,
+          totalSize: fileStats.size,
+          truncated: isLargeText || tablePreview.truncated
+        });
+        return;
+      }
+
       const textPreview = isLargeText
         ? takeLeadingLines(rawText, largeTextPreviewMaxLines)
         : { content: rawText, truncated: false };
