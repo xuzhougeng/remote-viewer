@@ -1,0 +1,68 @@
+{
+  "name": "remote-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist-node/electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:desktop": "concurrently -k \"npm:dev:node\" \"npm:dev:server\" \"npm:dev:client\" \"npm:dev:electron\"",
+    "dev:client": "vite",
+    "dev:electron": "wait-on file:dist-node/electron/main.js http://localhost:5173 tcp:4173 && cross-env RV_DESKTOP_DEV_URL=http://localhost:5173 electron .",
+    "dev:node": "tsc -p tsconfig.node.json --watch --preserveWatchOutput",
+    "dev:server": "tsx watch server/index.ts",
+    "build": "vite build && tsc -p tsconfig.node.json",
+    "desktop:dist": "npm run build && electron-builder --win portable",
+    "desktop:installer": "npm run build && electron-builder --win nsis",
+    "desktop:start": "npm run build && electron .",
+    "preview": "node dist-node/server/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit"
+  },
+  "build": {
+    "appId": "com.xzg.remoteviewer",
+    "productName": "Remote Viewer",
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "dist-node/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pdfjs-dist": "^4.4.168",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/ssh2": "^1.15.5",
+    "@vitejs/plugin-react": "^4.3.3",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^32.2.0",
+    "electron-builder": "^24.13.3",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "wait-on": "^8.0.1"
+  }
+}
