@@ -24,7 +24,7 @@ type ConnectionConfig = {
 };
 
 type RemoteEntry = {
-  extension?: "pdf" | "png";
+  extension?: string;
   kind: "directory" | "file";
   name: string;
   path: string;
@@ -74,6 +74,9 @@ type SessionRecord = {
 const defaultClientDist = path.resolve(process.cwd(), "dist");
 const sessions = new Map<string, SessionRecord>();
 const sessionTtlMs = 30 * 60 * 1000;
+const largeTextPreviewThresholdBytes = 10 * 1024 * 1024;
+const largeTextPreviewMaxBytes = 256 * 1024;
+const largeTextPreviewMaxLines = 120;
 
 class AppError extends Error {
   statusCode: number;
@@ -589,14 +592,8 @@ function parseDirectoryListing(
       continue;
     }
 
-    const extension = path.extname(entry.filename).toLowerCase();
-
-    if (extension !== ".pdf" && extension !== ".png") {
-      continue;
-    }
-
     parsedEntries.push({
-      extension: extension.slice(1) as "pdf" | "png",
+      extension: path.extname(entry.filename).toLowerCase().replace(/^\./, ""),
       kind: "file",
       name: entry.filename,
       path: path.posix.join(currentDir, entry.filename),
@@ -614,6 +611,72 @@ function parseDirectoryListing(
       sensitivity: "base"
     });
   });
+}
+
+function readRemoteFileSlice(
+  sftp: SFTPWrapper,
+  remotePath: string,
+  maxBytes: number
+): Promise<Buffer> {
+  if (maxBytes <= 0) {
+    return Promise.resolve(Buffer.alloc(0));
+  }
+
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    const stream = sftp.createReadStream(remotePath, {
+      end: maxBytes - 1,
+      start: 0
+    });
+
+    stream.on("data", (chunk: Buffer) => {
+      total += chunk.length;
+      chunks.push(chunk);
+    });
+    stream.on("error", reject);
+    stream.on("end", () => resolve(Buffer.concat(chunks, total)));
+  });
+}
+
+function looksLikeBinaryContent(buffer: Buffer): boolean {
+  if (!buffer.length) {
+    return false;
+  }
+
+  const sample = buffer.subarray(0, Math.min(buffer.length, 8192));
+  let suspiciousBytes = 0;
+
+  for (const byte of sample) {
+    if (byte === 0) {
+      return true;
+    }
+
+    if (byte < 7 || (byte > 14 && byte < 32)) {
+      suspiciousBytes += 1;
+    }
+  }
+
+  return suspiciousBytes / sample.length > 0.1;
+}
+
+function takeLeadingLines(
+  content: string,
+  maxLines: number
+): { content: string; truncated: boolean } {
+  const lines = content.split(/\r?\n/);
+
+  if (lines.length <= maxLines) {
+    return {
+      content,
+      truncated: false
+    };
+  }
+
+  return {
+    content: lines.slice(0, maxLines).join("\n"),
+    truncated: true
+  };
 }
 
 function createSession(
@@ -878,6 +941,69 @@ export function createRemoteViewerApp(
       response.status(appError.statusCode).json({
         error: appError.message
       });
+    }
+  });
+
+  app.get("/api/text", async (request, response) => {
+    let sftp: SFTPWrapper | null = null;
+
+    try {
+      const session = requireSession(String(request.query.sessionId || ""));
+      const remotePath = String(request.query.path || "").trim();
+
+      if (!remotePath) {
+        throw new AppError("缺少文件路径", 400);
+      }
+
+      sftp = await openSftp(session.client);
+      const resolvedPath = await sftpRealpath(sftp, remotePath);
+      const fileStats = await sftpStat(sftp, resolvedPath);
+
+      if (!fileStats.isFile()) {
+        throw new AppError("目标不是可读取文件", 400);
+      }
+
+      const isLargeText = fileStats.size > largeTextPreviewThresholdBytes;
+      const bytesToRead = isLargeText
+        ? largeTextPreviewMaxBytes
+        : fileStats.size;
+      const previewBuffer = await readRemoteFileSlice(
+        sftp,
+        resolvedPath,
+        bytesToRead
+      );
+
+      if (looksLikeBinaryContent(previewBuffer)) {
+        response.json({
+          kind: "binary",
+          message: "二进制文件不支持预览",
+          totalSize: fileStats.size
+        });
+        return;
+      }
+
+      const rawText = previewBuffer.toString("utf8");
+      const textPreview = isLargeText
+        ? takeLeadingLines(rawText, largeTextPreviewMaxLines)
+        : { content: rawText, truncated: false };
+
+      response.json({
+        content: textPreview.content,
+        kind: "text",
+        notice: isLargeText
+          ? `文件超过 10 MB，仅展示前 ${largeTextPreviewMaxLines} 行`
+          : "",
+        previewedBytes: previewBuffer.length,
+        totalSize: fileStats.size,
+        truncated: isLargeText || textPreview.truncated
+      });
+    } catch (error) {
+      const appError = asAppError(error, "远程文本预览失败");
+      response.status(appError.statusCode).json({
+        error: appError.message
+      });
+    } finally {
+      sftp?.end();
     }
   });
 
