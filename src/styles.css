@@ -141,6 +141,23 @@ select {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  flex-shrink: 0;
+}
+
+.connection-panel.is-collapsed {
+  gap: 12px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-subtitle {
+  color: rgba(34, 52, 63, 0.64);
+  font-size: 0.92rem;
 }
 
 .form-grid {
@@ -232,6 +249,11 @@ select {
   min-height: 0;
 }
 
+.browser-panel {
+  flex: 1;
+  overflow: hidden;
+}
+
 .browser-header,
 .viewer-toolbar,
 .pdf-toolbar {
@@ -241,13 +263,40 @@ select {
   gap: 16px;
 }
 
+.browser-actions,
+.path-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.browser-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.path-bar {
+  margin-top: 14px;
+}
+
+.path-bar input {
+  min-width: 0;
+}
+
+.compact-checkbox {
+  color: rgba(34, 52, 63, 0.74);
+  font-size: 0.92rem;
+}
+
 .file-list {
   display: flex;
   flex-direction: column;
+  flex: 1;
   gap: 10px;
   margin-top: 16px;
   min-height: 0;
   overflow: auto;
+  padding-right: 4px;
 }
 
 .file-row {
@@ -366,6 +415,19 @@ select {
   white-space: nowrap;
 }
 
+.text-preview-stage {
+  justify-content: flex-start;
+}
+
+.text-preview-content {
+  width: 100%;
+  margin: 0;
+  color: #22343f;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
 @media (max-width: 980px) {
   .shell {
     padding: 16px;
@@ -388,5 +450,16 @@ select {
 
   .viewer-panel {
     min-height: 520px;
+  }
+
+  .panel-header,
+  .browser-header,
+  .path-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .browser-actions {
+    justify-content: flex-start;
   }
 }
