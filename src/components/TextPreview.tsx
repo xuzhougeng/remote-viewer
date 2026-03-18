@@ -103,6 +103,33 @@ export function TextPreview({
         <div className="preview-placeholder">正在加载文本预览</div>
       ) : payload?.kind === "binary" ? (
         <div className="preview-placeholder">{payload.message}</div>
+      ) : payload?.kind === "table" ? (
+        <div className="preview-stage table-preview-stage">
+          <table
+            className="table-preview-table"
+            style={{ fontSize: `${Math.max(12, Math.round(13 * zoom))}px` }}
+          >
+            <tbody>
+              {payload.rows.map((row, rowIndex) => {
+                const cellTag = rowIndex === 0 ? "th" : "td";
+
+                return (
+                  <tr key={`row-${rowIndex}`}>
+                    {row.map((cell, cellIndex) => {
+                      const Cell = cellTag;
+
+                      return (
+                        <Cell key={`cell-${rowIndex}-${cellIndex}`}>
+                          {cell || " "}
+                        </Cell>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div className="preview-stage text-preview-stage">
           <pre className="text-preview-content" style={textStyle}>
@@ -114,6 +141,9 @@ export function TextPreview({
       <div className="preview-meta">
         {payload?.kind === "binary"
           ? `文件大小 ${formatSize(payload.totalSize)}`
+          : payload?.kind === "table"
+            ? payload.notice ||
+              `已读取 ${formatSize(payload.previewedBytes)} / ${formatSize(payload.totalSize)}`
           : payload?.kind === "text"
             ? payload.notice ||
               `已读取 ${formatSize(payload.previewedBytes)} / ${formatSize(payload.totalSize)}`

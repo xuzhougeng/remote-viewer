@@ -492,6 +492,44 @@ select {
   word-break: break-word;
 }
 
+.table-preview-stage {
+  justify-content: flex-start;
+  padding: 0;
+}
+
+.table-preview-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table-preview-table th,
+.table-preview-table td {
+  padding: 0.78rem 0.9rem;
+  border-right: 1px solid rgba(35, 61, 75, 0.08);
+  border-bottom: 1px solid rgba(35, 61, 75, 0.08);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.table-preview-table th {
+  position: sticky;
+  top: 0;
+  background: rgba(235, 245, 243, 0.98);
+  color: #20333f;
+  z-index: 1;
+}
+
+.table-preview-table tr > :first-child {
+  border-left: 1px solid rgba(35, 61, 75, 0.08);
+}
+
+.table-preview-table tr:first-child > * {
+  border-top: 1px solid rgba(35, 61, 75, 0.08);
+}
+
 @media (max-width: 980px) {
   .shell {
     padding: 16px;
