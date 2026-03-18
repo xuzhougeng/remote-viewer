@@ -728,6 +728,183 @@ function buildDelimitedPreview(
   };
 }
 
+function normalizeRemoteRoutePath(routePath: string): string {
+  const normalized = routePath.startsWith("/")
+    ? routePath
+    : `/${routePath}`;
+
+  return path.posix.normalize(normalized);
+}
+
+function encodeRemotePathForPreview(remotePath: string): string {
+  return normalizeRemoteRoutePath(remotePath)
+    .split("/")
+    .map((segment, index) =>
+      index === 0 ? "" : encodeURIComponent(segment)
+    )
+    .join("/");
+}
+
+function buildHtmlPreviewProxyPath(
+  sessionId: string,
+  remotePath: string
+): string {
+  return `/api/html-preview/${encodeURIComponent(
+    sessionId
+  )}${encodeRemotePathForPreview(remotePath)}`;
+}
+
+function isSpecialUrlReference(value: string): boolean {
+  return (
+    !value ||
+    value.startsWith("#") ||
+    value.startsWith("//") ||
+    /^[a-z][a-z\d+\-.]*:/i.test(value)
+  );
+}
+
+function rewriteHtmlAbsoluteReference(
+  value: string,
+  sessionId: string
+): string {
+  if (!value.startsWith("/") || value.startsWith("//")) {
+    return value;
+  }
+
+  return buildHtmlPreviewProxyPath(sessionId, value);
+}
+
+function rewriteHtmlBaseReference(
+  value: string,
+  sessionId: string,
+  currentDir: string
+): string {
+  if (isSpecialUrlReference(value)) {
+    return value;
+  }
+
+  const trailingSlash = value.endsWith("/") ? "/" : "";
+  const resolvedPath = value.startsWith("/")
+    ? normalizeRemoteRoutePath(value)
+    : path.posix.normalize(path.posix.join(currentDir, value));
+
+  const proxiedPath = buildHtmlPreviewProxyPath(sessionId, resolvedPath);
+  return trailingSlash && !proxiedPath.endsWith("/")
+    ? `${proxiedPath}/`
+    : proxiedPath;
+}
+
+function rewriteHtmlSrcset(value: string, sessionId: string): string {
+  return value
+    .split(",")
+    .map((entry) => {
+      const trimmedEntry = entry.trim();
+
+      if (!trimmedEntry) {
+        return trimmedEntry;
+      }
+
+      const [rawUrl, ...descriptors] = trimmedEntry.split(/\s+/);
+
+      if (!rawUrl.startsWith("/") || rawUrl.startsWith("//")) {
+        return trimmedEntry;
+      }
+
+      return [rewriteHtmlAbsoluteReference(rawUrl, sessionId), ...descriptors]
+        .join(" ")
+        .trim();
+    })
+    .join(", ");
+}
+
+function rewriteHtmlPreviewDocument(
+  content: string,
+  sessionId: string,
+  remotePath: string
+): string {
+  const currentDir = path.posix.dirname(remotePath);
+
+  return content
+    .replace(
+      /<base\b([^>]*?)href=(["'])(.*?)\2([^>]*)>/gi,
+      (_match, before, quote, href, after) =>
+        `<base${before}href=${quote}${rewriteHtmlBaseReference(
+          href,
+          sessionId,
+          currentDir
+        )}${quote}${after}>`
+    )
+    .replace(/\bsrcset=(["'])(.*?)\1/gi, (_match, quote, value) => {
+      return `srcset=${quote}${rewriteHtmlSrcset(value, sessionId)}${quote}`;
+    })
+    .replace(
+      /\b(src|href|poster|action)=(["'])(.*?)\2/gi,
+      (_match, attribute, quote, value) =>
+        `${attribute}=${quote}${rewriteHtmlAbsoluteReference(
+          value,
+          sessionId
+        )}${quote}`
+    )
+    .replace(
+      /url\((["']?)\/(?!\/)([^)"']*)\1\)/gi,
+      (_match, quote, relativePath) =>
+        `url(${quote}${buildHtmlPreviewProxyPath(
+          sessionId,
+          `/${relativePath}`
+        )}${quote})`
+    );
+}
+
+function getRemoteContentType(remotePath: string): string {
+  const extension = path.extname(remotePath).toLowerCase();
+
+  switch (extension) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".csv":
+      return "text/csv; charset=utf-8";
+    case ".gif":
+      return "image/gif";
+    case ".htm":
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".ico":
+      return "image/x-icon";
+    case ".jpeg":
+    case ".jpg":
+      return "image/jpeg";
+    case ".js":
+    case ".mjs":
+      return "text/javascript; charset=utf-8";
+    case ".json":
+    case ".map":
+      return "application/json; charset=utf-8";
+    case ".pdf":
+      return "application/pdf";
+    case ".png":
+      return "image/png";
+    case ".svg":
+      return "image/svg+xml";
+    case ".tsv":
+      return "text/tab-separated-values; charset=utf-8";
+    case ".txt":
+    case ".log":
+      return "text/plain; charset=utf-8";
+    case ".wasm":
+      return "application/wasm";
+    case ".webp":
+      return "image/webp";
+    case ".woff":
+      return "font/woff";
+    case ".woff2":
+      return "font/woff2";
+    case ".xml":
+      return "application/xml; charset=utf-8";
+    default:
+      return "application/octet-stream";
+  }
+}
+
 function createSession(
   target: ResolvedConnectionTarget
 ): Promise<SessionRecord> {
@@ -1078,6 +1255,97 @@ export function createRemoteViewerApp(
       });
     } finally {
       sftp?.end();
+    }
+  });
+
+  app.options("/api/html-preview/:sessionId/*", (_request, response) => {
+    response.setHeader("Access-Control-Allow-Origin", "*");
+    response.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    response.status(204).end();
+  });
+
+  app.get("/api/html-preview/:sessionId/*", async (request, response) => {
+    let sftp: SFTPWrapper | null = null;
+
+    try {
+      const params = request.params as { sessionId?: string; 0?: string };
+      const session = requireSession(String(params.sessionId || ""));
+      const requestedPath = String(params[0] || "").trim();
+
+      if (!requestedPath) {
+        throw new AppError("缺少 HTML 预览路径", 400);
+      }
+
+      sftp = await openSftp(session.client);
+
+      const remotePath = normalizeRemoteRoutePath(requestedPath);
+      const resolvedPath = await sftpRealpath(sftp, remotePath);
+      const fileStats = await sftpStat(sftp, resolvedPath);
+
+      if (!fileStats.isFile()) {
+        throw new AppError("目标不是可读取文件", 400);
+      }
+
+      const extension = path.extname(resolvedPath).toLowerCase();
+
+      response.setHeader("Access-Control-Allow-Origin", "*");
+      response.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+      response.setHeader("Cache-Control", "no-store");
+
+      if (extension === ".html" || extension === ".htm") {
+        const htmlBuffer = await readRemoteFileSlice(
+          sftp,
+          resolvedPath,
+          fileStats.size
+        );
+        const htmlContent = htmlBuffer.toString("utf8");
+
+        response.setHeader("Content-Type", "text/html; charset=utf-8");
+        response.send(
+          rewriteHtmlPreviewDocument(htmlContent, session.id, resolvedPath)
+        );
+        return;
+      }
+
+      const fileStream = sftp.createReadStream(resolvedPath);
+      let finished = false;
+
+      const cleanup = () => {
+        if (finished) {
+          return;
+        }
+
+        finished = true;
+        fileStream.destroy();
+        sftp?.end();
+      };
+
+      response.setHeader("Content-Type", getRemoteContentType(resolvedPath));
+
+      fileStream.on("error", (error: Error) => {
+        if (!response.headersSent) {
+          const appError = asAppError(error, "HTML 资源读取失败");
+          response.status(appError.statusCode).json({
+            error: appError.message
+          });
+        } else {
+          response.destroy(error);
+        }
+
+        cleanup();
+      });
+
+      response.on("close", cleanup);
+      fileStream.on("close", cleanup);
+      fileStream.pipe(response);
+    } catch (error) {
+      sftp?.end();
+
+      const appError = asAppError(error, "HTML 资源读取失败");
+      response.status(appError.statusCode).json({
+        error: appError.message
+      });
     }
   });
 
