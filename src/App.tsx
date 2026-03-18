@@ -247,6 +247,7 @@ export default function App() {
   const [fitToWidth, setFitToWidth] = useState(true);
   const [pathDraft, setPathDraft] = useState(defaultForm.rootPath);
   const [hideDotFiles, setHideDotFiles] = useState(true);
+  const [fileFilter, setFileFilter] = useState("");
   const [isConnectionPanelCollapsed, setIsConnectionPanelCollapsed] =
     useState(false);
   const [isPending, startTransition] = useTransition();
@@ -364,6 +365,7 @@ export default function App() {
         setActiveSession(session);
         setCurrentDir(payload.currentDir);
         setEntries(payload.entries);
+        setFileFilter("");
         setPathDraft(payload.currentDir);
 
         if (options?.clearSelection) {
@@ -432,6 +434,7 @@ export default function App() {
         setActiveSession(nextSession);
         setCurrentDir("");
         setEntries([]);
+        setFileFilter("");
         setPathDraft(form.rootPath);
         setSelectedFile(null);
       });
@@ -489,18 +492,32 @@ export default function App() {
       path: selectedFile.path
     })}`;
   }, [activeSession, selectedFile]);
+  const normalizedFileFilter = fileFilter.trim().toLowerCase();
 
   const visibleEntries = useMemo(
     () =>
-      hideDotFiles
-        ? entries.filter((entry) => !entry.name.startsWith("."))
-        : entries,
-    [entries, hideDotFiles]
+      entries.filter((entry) => {
+        if (hideDotFiles && entry.name.startsWith(".")) {
+          return false;
+        }
+
+        if (
+          normalizedFileFilter &&
+          !entry.name.toLowerCase().includes(normalizedFileFilter)
+        ) {
+          return false;
+        }
+
+        return true;
+      }),
+    [entries, hideDotFiles, normalizedFileFilter]
   );
   const emptyState = !activeSession
     ? "先建立 SSH 会话，再读取远程目录"
     : entries.length && !visibleEntries.length
-      ? "当前目录只有点文件，关闭“隐藏点文件”后可查看"
+      ? normalizedFileFilter
+        ? "当前筛选条件下没有匹配项"
+        : "当前目录只有点文件，关闭“隐藏点文件”后可查看"
       : "当前目录没有文件";
   const selectedConfiguredHost = configuredHosts.find(
     (item) => item.alias === selectedAlias
@@ -527,13 +544,16 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-copy">
           <p className="eyebrow">SSH Remote Viewer</p>
-          <h1>远程文件浏览器</h1>
-        </div>
-        <div className="topbar-note-card">
-          <div className="section-title">说明</div>
+          <div className="topbar-headline">
+            <h1>远程文件浏览器</h1>
+            <div className="topbar-pills">
+              <span>SSH2</span>
+              <span>Key / Password</span>
+              <span>PDF · PNG · Text · CST</span>
+            </div>
+          </div>
           <p className="topbar-note">
-            通过 `ssh2` 建立远程会话，支持密码或 SSH Key 登录。PDF /
-            PNG 保持缩放优先，同时补充文本和 CST 文件预览。
+            通过 `ssh2` 建立远程会话，支持密码或 SSH Key 登录，优先优化图片和 PDF 的缩放体验，并补充文本预览。
           </p>
         </div>
       </header>
@@ -723,6 +743,7 @@ export default function App() {
                       setActiveSession(null);
                       setCurrentDir("");
                       setEntries([]);
+                      setFileFilter("");
                       setPathDraft(form.rootPath);
                       setSelectedFile(null);
                       setIsConnectionPanelCollapsed(false);
@@ -813,6 +834,17 @@ export default function App() {
                 跳转
               </button>
             </form>
+
+            <div className="browser-tools">
+              <input
+                disabled={!activeSession}
+                onChange={(event) => setFileFilter(event.target.value)}
+                placeholder="筛选当前路径下的文件"
+                type="text"
+                value={fileFilter}
+              />
+              <span className="filter-count">{visibleEntries.length} 项</span>
+            </div>
 
             <div className="file-list">
               {!visibleEntries.length ? (
