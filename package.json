@@ -1,6 +1,6 @@
 {
   "name": "remote-viewer",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "dist-node/electron/main.js",
@@ -14,7 +14,9 @@
     "build": "vite build && tsc -p tsconfig.node.json",
     "desktop:dist": "npm run build && electron-builder --win portable",
     "desktop:dist:mac": "npm run build && electron-builder --mac zip --x64 --arm64",
-    "desktop:dist:win": "npm run desktop:dist",
+    "desktop:dist:mac:arm64": "npm run build && electron-builder --mac zip --arm64",
+    "desktop:dist:mac:x64": "npm run build && electron-builder --mac zip --x64",
+    "desktop:dist:win": "npm run build && electron-builder --win portable nsis",
     "desktop:installer": "npm run build && electron-builder --win nsis",
     "desktop:start": "npm run build && electron .",
     "preview": "node dist-node/server/index.js",

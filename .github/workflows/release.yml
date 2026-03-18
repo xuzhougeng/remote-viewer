@@ -24,22 +24,30 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Resolve release version
+        shell: bash
+        run: echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Windows portable
+      - name: Sync package version
+        shell: bash
+        run: npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Build Windows assets
         run: npm run desktop:dist:win
 
-      - name: Upload Windows assets to release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
         with:
-          files: release/*.exe
-          fail_on_unmatched_files: true
-          overwrite_files: true
+          name: windows-assets
+          if-no-files-found: error
+          path: release/*.exe
 
-  build-macos:
-    name: Build macOS
-    runs-on: macos-latest
+  build-macos-x64:
+    name: Build macOS x64
+    runs-on: macos-13
 
     steps:
       - name: Checkout
@@ -51,8 +59,16 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Resolve release version
+        shell: bash
+        run: echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Sync package version
+        shell: bash
+        run: npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version
 
       - name: Prepare macOS icon
         if: ${{ hashFiles('build/icon.png') != '' }}
@@ -74,11 +90,90 @@ jobs:
       - name: Build macOS zip
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npm run desktop:dist:mac
+        run: npm run desktop:dist:mac:x64
 
-      - name: Upload macOS assets to release
+      - name: Upload macOS x64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-x64-assets
+          if-no-files-found: error
+          path: release/*.zip
+
+  build-macos-arm64:
+    name: Build macOS arm64
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Resolve release version
+        shell: bash
+        run: echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync package version
+        shell: bash
+        run: npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Prepare macOS icon
+        if: ${{ hashFiles('build/icon.png') != '' }}
+        run: |
+          rm -rf build/icon.iconset
+          mkdir -p build/icon.iconset
+          sips -z 16 16 build/icon.png --out build/icon.iconset/icon_16x16.png >/dev/null
+          sips -z 32 32 build/icon.png --out build/icon.iconset/icon_16x16@2x.png >/dev/null
+          sips -z 32 32 build/icon.png --out build/icon.iconset/icon_32x32.png >/dev/null
+          sips -z 64 64 build/icon.png --out build/icon.iconset/icon_32x32@2x.png >/dev/null
+          sips -z 128 128 build/icon.png --out build/icon.iconset/icon_128x128.png >/dev/null
+          sips -z 256 256 build/icon.png --out build/icon.iconset/icon_128x128@2x.png >/dev/null
+          sips -z 256 256 build/icon.png --out build/icon.iconset/icon_256x256.png >/dev/null
+          sips -z 512 512 build/icon.png --out build/icon.iconset/icon_256x256@2x.png >/dev/null
+          sips -z 512 512 build/icon.png --out build/icon.iconset/icon_512x512.png >/dev/null
+          cp build/icon.png build/icon.iconset/icon_512x512@2x.png
+          iconutil -c icns build/icon.iconset -o build/icon.icns
+
+      - name: Build macOS zip
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run desktop:dist:mac:arm64
+
+      - name: Upload macOS arm64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-assets
+          if-no-files-found: error
+          path: release/*.zip
+
+  publish-release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs:
+      - build-windows
+      - build-macos-x64
+      - build-macos-arm64
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: release-assets
+
+      - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.zip
+          files: |
+            release-assets/**/*.exe
+            release-assets/**/*.zip
           fail_on_unmatched_files: true
+          generate_release_notes: true
           overwrite_files: true
