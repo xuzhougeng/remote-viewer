@@ -8,6 +8,7 @@ const isDev = Boolean(process.env.RV_DESKTOP_DEV_URL);
 const devUrl = process.env.RV_DESKTOP_DEV_URL || "http://localhost:5173";
 const serverPort = Number(process.env.RV_SERVER_PORT || 4173);
 const packagedClientDist = path.resolve(currentDir, "../../dist");
+const appId = "com.xzg.remoteviewer";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -42,6 +43,7 @@ async function createMainWindow() {
 }
 
 app.whenReady().then(async () => {
+  app.setAppUserModelId(appId);
   await createMainWindow();
 
   app.on("activate", () => {

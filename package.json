@@ -21,6 +21,8 @@
   "build": {
     "appId": "com.xzg.remoteviewer",
     "productName": "Remote Viewer",
+    "artifactName": "${name}-${version}-${arch}.${ext}",
+    "executableName": "remote-viewer",
     "asar": true,
     "files": [
       "dist/**/*",
@@ -41,6 +43,12 @@
           ]
         }
       ]
+    },
+    "portable": {
+      "artifactName": "${name}-${version}-portable-${arch}.${ext}"
+    },
+    "nsis": {
+      "artifactName": "${name}-${version}-setup-${arch}.${ext}"
     }
   },
   "dependencies": {
