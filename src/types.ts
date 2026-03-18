@@ -35,7 +35,7 @@ export type ConfiguredSshHost = {
 };
 
 export type RemoteEntry = {
-  extension?: "pdf" | "png";
+  extension?: string;
   kind: "directory" | "file";
   name: string;
   path: string;
@@ -49,3 +49,18 @@ export type ResolvedSshHost = {
   port?: string;
   user?: string;
 };
+
+export type TextPreviewPayload =
+  | {
+      kind: "binary";
+      message: string;
+      totalSize: number;
+    }
+  | {
+      content: string;
+      kind: "text";
+      notice: string;
+      previewedBytes: number;
+      totalSize: number;
+      truncated: boolean;
+    };
