@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState, useTransition } from "react";
+import { HtmlPreview } from "./components/HtmlPreview";
 import { ImagePreview } from "./components/ImagePreview";
 import { PdfPreview } from "./components/PdfPreview";
 import { TextPreview } from "./components/TextPreview";
@@ -34,6 +35,7 @@ const knownTextExtensions = new Set([
   "go",
   "h",
   "hpp",
+  "htm",
   "html",
   "ini",
   "java",
@@ -197,6 +199,27 @@ function isTextLikeEntry(entry: RemoteEntry): boolean {
   return knownTextFileNames.has(entry.name.toLowerCase());
 }
 
+function isHtmlEntry(entry: RemoteEntry): boolean {
+  if (entry.kind !== "file") {
+    return false;
+  }
+
+  const extension = entry.extension?.toLowerCase();
+  return extension === "html" || extension === "htm";
+}
+
+function buildHtmlPreviewUrl(session: ActiveSession, remotePath: string): string {
+  const normalized = remotePath.startsWith("/") ? remotePath : `/${remotePath}`;
+  const encodedPath = normalized
+    .split("/")
+    .map((segment, index) =>
+      index === 0 ? "" : encodeURIComponent(segment)
+    )
+    .join("/");
+
+  return `/api/html-preview/${encodeURIComponent(session.sessionId)}${encodedPath}`;
+}
+
 function formatEntryBadge(entry: RemoteEntry): string {
   if (entry.kind === "directory") {
     return "DIR";
@@ -220,6 +243,10 @@ function formatEntrySummary(entry: RemoteEntry): string {
 
   if (entry.extension === "png") {
     return `PNG · ${formatSize(entry.size)}`;
+  }
+
+  if (isHtmlEntry(entry)) {
+    return `网页 · ${formatSize(entry.size)}`;
   }
 
   if (isTextLikeEntry(entry)) {
@@ -473,6 +500,8 @@ export default function App() {
       ? "pdf"
       : selectedFile.extension?.toLowerCase() === "png"
         ? "image"
+        : isHtmlEntry(selectedFile)
+          ? "html"
         : "text";
   const viewerUrl = useMemo(() => {
     if (!activeSession || !selectedFile) {
@@ -491,6 +520,13 @@ export default function App() {
     return `/api/text?${buildSessionQuery(activeSession, {
       path: selectedFile.path
     })}`;
+  }, [activeSession, selectedFile]);
+  const htmlPreviewUrl = useMemo(() => {
+    if (!activeSession || !selectedFile) {
+      return "";
+    }
+
+    return buildHtmlPreviewUrl(activeSession, selectedFile.path);
   }, [activeSession, selectedFile]);
   const normalizedFileFilter = fileFilter.trim().toLowerCase();
 
@@ -544,19 +580,19 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-copy">
           <p className="eyebrow">SSH Remote Viewer</p>
-          <div className="topbar-headline">
-            <h1>远程文件浏览器</h1>
-            <div className="topbar-pills">
-              <span>SSH2</span>
-              <span>Key / Password</span>
-              <span>PDF · PNG · Text · CST</span>
+            <div className="topbar-headline">
+              <h1>远程文件浏览器</h1>
+              <div className="topbar-pills">
+                <span>SSH2</span>
+                <span>Key / Password</span>
+                <span>PDF · PNG · HTML · Text</span>
+              </div>
             </div>
+            <p className="topbar-note">
+            通过 `ssh2` 建立远程会话，支持密码或 SSH Key 登录，优先优化图片和 PDF 的缩放体验，同时补充 HTML、文本和 CST 预览。
+            </p>
           </div>
-          <p className="topbar-note">
-            通过 `ssh2` 建立远程会话，支持密码或 SSH Key 登录，优先优化图片和 PDF 的缩放体验，并补充文本预览。
-          </p>
-        </div>
-      </header>
+        </header>
 
       <main className="workspace">
         <section className="sidebar">
@@ -936,9 +972,9 @@ export default function App() {
           <section className="panel viewer-panel light-panel">
             {isPending ? <div className="viewer-status">目录状态更新中</div> : null}
 
-            {!selectedFile || !viewerUrl ? (
+            {!selectedFile ? (
               <div className="viewer-placeholder">
-                选择左侧文件后，会在这里显示 PDF、PNG 或文本预览。
+                选择左侧文件后，会在这里显示 PDF、PNG、HTML 或文本预览。
               </div>
             ) : selectedPreviewKind === "pdf" ? (
               <PdfPreview
@@ -952,6 +988,13 @@ export default function App() {
                 alt={selectedFile.name}
                 fitToWidth={fitToWidth}
                 src={viewerUrl}
+                zoom={zoom}
+              />
+            ) : selectedPreviewKind === "html" ? (
+              <HtmlPreview
+                fileName={selectedFile.name}
+                fileUrl={htmlPreviewUrl}
+                fitToWidth={fitToWidth}
                 zoom={zoom}
               />
             ) : (
