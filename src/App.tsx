@@ -517,19 +517,25 @@ export default function App() {
     : "";
   const isBusy = isConnecting || isLoadingDir;
   const connectionSummary = activeSession
-    ? `${sessionSummary} · ${currentDir || activeSession.rootPath}`
+    ? sessionSummary
     : "先填写 SSH 连接信息，再读取远程目录";
+  const browserPathLabel = currentDir || "-";
+  const selectedFilePath = selectedFile ? selectedFile.path : "尚未选择文件";
 
   return (
     <div className="shell">
       <header className="topbar">
-        <div>
+        <div className="topbar-copy">
           <p className="eyebrow">SSH Remote Viewer</p>
           <h1>远程文件浏览器</h1>
         </div>
-        <p className="topbar-note">
-          通过 `ssh2` 建立远程会话，支持密码或 SSH Key 登录。PDF / PNG 保持缩放优先，同时补充文本和 CST 文件预览。
-        </p>
+        <div className="topbar-note-card">
+          <div className="section-title">说明</div>
+          <p className="topbar-note">
+            通过 `ssh2` 建立远程会话，支持密码或 SSH Key 登录。PDF /
+            PNG 保持缩放优先，同时补充文本和 CST 文件预览。
+          </p>
+        </div>
       </header>
 
       <main className="workspace">
@@ -543,7 +549,9 @@ export default function App() {
             <div className="panel-header">
               <div>
                 <div className="section-title">连接参数</div>
-                <div className="panel-subtitle">{connectionSummary}</div>
+                <div className="panel-subtitle" title={connectionSummary}>
+                  {connectionSummary}
+                </div>
               </div>
               <button
                 onClick={() =>
@@ -762,7 +770,9 @@ export default function App() {
             <div className="browser-header">
               <div>
                 <div className="section-title">远程文件</div>
-                <div className="current-path">{currentDir || "-"}</div>
+                <div className="current-path" title={browserPathLabel}>
+                  {browserPathLabel}
+                </div>
               </div>
               <div className="browser-actions">
                 <label className="checkbox-row compact-checkbox">
@@ -851,10 +861,10 @@ export default function App() {
 
         <section className="viewer-column">
           <div className="panel viewer-toolbar light-panel">
-            <div>
+            <div className="viewer-heading">
               <div className="section-title">预览区</div>
-              <div className="viewer-file-name">
-                {selectedFile ? selectedFile.path : "尚未选择文件"}
+              <div className="viewer-file-name" title={selectedFilePath}>
+                {selectedFilePath}
               </div>
             </div>
             <div className="viewer-controls">
