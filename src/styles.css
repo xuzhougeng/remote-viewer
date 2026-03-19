@@ -374,6 +374,7 @@ select {
 .preview-meta,
 .viewer-status,
 .empty-state,
+.transfer-feedback,
 .panel-error,
 .config-summary,
 .session-summary {
@@ -487,10 +488,22 @@ select {
   min-width: 0;
 }
 
+.hidden-file-input {
+  display: none;
+}
+
 .filter-count {
   color: var(--color-text-soft);
   font-size: 0.84rem;
   white-space: nowrap;
+}
+
+.transfer-feedback {
+  margin-top: 10px;
+  padding: 0.82rem 0.92rem;
+  border: 1px solid var(--color-table-border);
+  border-radius: 16px;
+  background: var(--color-surface-soft);
 }
 
 .path-bar {

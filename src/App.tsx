@@ -1,4 +1,12 @@
-import { FormEvent, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition
+} from "react";
 import { HtmlPreview } from "./components/HtmlPreview";
 import { ImagePreview } from "./components/ImagePreview";
 import { PdfPreview } from "./components/PdfPreview";
@@ -85,6 +93,12 @@ function buildSessionQuery(
   });
 
   return params.toString();
+}
+
+function buildDownloadUrl(session: ActiveSession, remotePath: string): string {
+  return `/api/download?${buildSessionQuery(session, {
+    path: remotePath
+  })}`;
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -265,6 +279,7 @@ function formatEntrySummary(entry: RemoteEntry): string {
 }
 
 export default function App() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [form, setForm] = useState(defaultForm);
   const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
@@ -284,6 +299,9 @@ export default function App() {
   const [pathDraft, setPathDraft] = useState(defaultForm.rootPath);
   const [hideDotFiles, setHideDotFiles] = useState(true);
   const [fileFilter, setFileFilter] = useState("");
+  const [transferNotice, setTransferNotice] = useState("");
+  const [transferError, setTransferError] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
   const [isConnectionPanelCollapsed, setIsConnectionPanelCollapsed] =
     useState(false);
   const [isPending, startTransition] = useTransition();
@@ -392,7 +410,7 @@ export default function App() {
     session: ActiveSession,
     dir: string,
     options?: { clearSelection?: boolean }
-  ) {
+  ): Promise<{ currentDir: string; entries: RemoteEntry[] } | null> {
     setIsLoadingDir(true);
     setError("");
 
@@ -413,17 +431,60 @@ export default function App() {
           setSelectedFile(null);
         }
       });
+
+      return payload;
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "目录读取失败");
+      return null;
     } finally {
       setIsLoadingDir(false);
     }
+  }
+
+  async function uploadRemoteFile(
+    session: ActiveSession,
+    dir: string,
+    file: File,
+    overwrite = false
+  ): Promise<void> {
+    const response = await fetch(
+      `/api/upload?${buildSessionQuery(session, {
+        dir,
+        filename: file.name,
+        overwrite: overwrite ? "1" : "0"
+      })}`,
+      {
+        body: file,
+        headers: file.type
+          ? {
+              "Content-Type": file.type
+            }
+          : undefined,
+        method: "POST"
+      }
+    );
+
+    if (response.ok) {
+      return;
+    }
+
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+    const uploadError = new Error(
+      payload?.error || `上传失败: ${response.status}`
+    ) as Error & { status?: number };
+
+    uploadError.status = response.status;
+    throw uploadError;
   }
 
   async function handleConnect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsConnecting(true);
     setError("");
+    setTransferNotice("");
+    setTransferError("");
 
     const previousSessionId = activeSession?.sessionId;
 
@@ -506,6 +567,85 @@ export default function App() {
       pathDraft.trim() || currentDir || activeSession.rootPath || "/";
 
     void loadDirectory(activeSession, nextDir, { clearSelection: true });
+  }
+
+  async function handleUploadChange(event: ChangeEvent<HTMLInputElement>) {
+    const files = [...(event.target.files || [])];
+
+    if (!activeSession || !currentDir || !files.length) {
+      event.target.value = "";
+      return;
+    }
+
+    setIsUploading(true);
+    setTransferError("");
+    setTransferNotice("");
+
+    try {
+      for (const [index, file] of files.entries()) {
+        setTransferNotice(
+          `正在上传 ${file.name} (${index + 1}/${files.length})`
+        );
+
+        try {
+          await uploadRemoteFile(activeSession, currentDir, file);
+        } catch (error) {
+          const candidate = error as Error & { status?: number };
+
+          if (
+            candidate.status === 409 &&
+            window.confirm(`远程已存在 ${file.name}，是否覆盖？`)
+          ) {
+            await uploadRemoteFile(activeSession, currentDir, file, true);
+            continue;
+          }
+
+          throw error;
+        }
+      }
+
+      const refreshed = await loadDirectory(activeSession, currentDir);
+
+      if (files.length === 1 && refreshed) {
+        const uploadedEntry = refreshed.entries.find(
+          (entry) => entry.kind === "file" && entry.name === files[0].name
+        );
+
+        if (uploadedEntry) {
+          setSelectedFile(uploadedEntry);
+        }
+      }
+
+      setTransferNotice(
+        files.length === 1
+          ? `已上传 ${files[0].name}`
+          : `已上传 ${files.length} 个文件`
+      );
+    } catch (uploadError) {
+      setTransferError(
+        uploadError instanceof Error ? uploadError.message : "文件上传失败"
+      );
+      setTransferNotice("");
+    } finally {
+      event.target.value = "";
+      setIsUploading(false);
+    }
+  }
+
+  function handleDownloadSelectedFile() {
+    if (!activeSession || !selectedFile) {
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = buildDownloadUrl(activeSession, selectedFile.path);
+    link.download = selectedFile.name;
+    link.rel = "noopener";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTransferError("");
+    setTransferNotice(`已开始下载 ${selectedFile.name}`);
   }
 
   const selectedPreviewKind = !selectedFile
@@ -600,7 +740,7 @@ export default function App() {
                 <div className="topbar-pills">
                   <span>SSH2</span>
                   <span>Key / Password</span>
-                  <span>PDF · PNG · HTML · Text</span>
+                  <span>上传 · 下载 · 预览</span>
                 </div>
                 <button
                   className="theme-toggle"
@@ -614,7 +754,7 @@ export default function App() {
               </div>
             </div>
             <p className="topbar-note">
-            通过 `ssh2` 建立远程会话，支持密码或 SSH Key 登录，优先优化图片和 PDF 的缩放体验，同时补充 HTML、文本和 CST 预览。
+            通过 `ssh2` 建立远程会话，支持密码或 SSH Key 登录，可在当前目录上传本地文件、下载远程文件，并预览 PDF、图片、HTML 与文本内容。
             </p>
           </div>
         </header>
@@ -805,6 +945,8 @@ export default function App() {
                       setCurrentDir("");
                       setEntries([]);
                       setFileFilter("");
+                      setTransferNotice("");
+                      setTransferError("");
                       setPathDraft(form.rootPath);
                       setSelectedFile(null);
                       setIsConnectionPanelCollapsed(false);
@@ -880,8 +1022,23 @@ export default function App() {
                 >
                   返回上级
                 </button>
+                <button
+                  disabled={!activeSession || !currentDir || isUploading}
+                  onClick={() => fileInputRef.current?.click()}
+                  type="button"
+                >
+                  {isUploading ? "上传中" : "上传文件"}
+                </button>
               </div>
             </div>
+
+            <input
+              className="hidden-file-input"
+              multiple
+              onChange={handleUploadChange}
+              ref={fileInputRef}
+              type="file"
+            />
 
             <form className="path-bar" onSubmit={handlePathSubmit}>
               <input
@@ -906,6 +1063,13 @@ export default function App() {
               />
               <span className="filter-count">{visibleEntries.length} 项</span>
             </div>
+
+            {transferError ? (
+              <div className="panel-error transfer-feedback">{transferError}</div>
+            ) : null}
+            {!transferError && transferNotice ? (
+              <div className="transfer-feedback">{transferNotice}</div>
+            ) : null}
 
             <div className="file-list">
               {!visibleEntries.length ? (
@@ -961,6 +1125,13 @@ export default function App() {
               </div>
             </div>
             <div className="viewer-controls">
+              <button
+                disabled={!selectedFile}
+                onClick={handleDownloadSelectedFile}
+                type="button"
+              >
+                下载
+              </button>
               <button
                 disabled={!selectedFile}
                 onClick={() => setZoom((value) => Math.max(value - 0.1, 0.2))}

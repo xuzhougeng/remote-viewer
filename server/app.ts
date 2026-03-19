@@ -5,6 +5,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import * as ssh2 from "ssh2";
 import type {
   ConnectConfig,
@@ -572,6 +573,50 @@ function sftpReadDir(
   });
 }
 
+function sftpUnlink(sftp: SFTPWrapper, remotePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    sftp.unlink(remotePath, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+function isSftpNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const candidate = error as { code?: number | string; message?: string };
+  const message = candidate.message || "";
+
+  return (
+    candidate.code === 2 ||
+    candidate.code === "ENOENT" ||
+    /no such file/i.test(message)
+  );
+}
+
+async function sftpPathExists(
+  sftp: SFTPWrapper,
+  remotePath: string
+): Promise<boolean> {
+  try {
+    await sftpStat(sftp, remotePath);
+    return true;
+  } catch (error) {
+    if (isSftpNotFoundError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
 function parseDirectoryListing(
   currentDir: string,
   entries: FileEntryWithStats[]
@@ -734,6 +779,32 @@ function normalizeRemoteRoutePath(routePath: string): string {
     : `/${routePath}`;
 
   return path.posix.normalize(normalized);
+}
+
+function normalizeUploadFileName(rawFileName: string): string {
+  const normalized = rawFileName.trim().replace(/\\/g, "/");
+  const fileName = path.posix.basename(normalized);
+
+  if (!fileName || fileName === "." || fileName === "..") {
+    throw new AppError("上传文件名不合法", 400);
+  }
+
+  return fileName;
+}
+
+function buildContentDispositionHeader(
+  filename: string,
+  dispositionType: "attachment" | "inline"
+): string {
+  const fallback = filename
+    .replace(/[^\x20-\x7E]+/g, "_")
+    .replace(/["\\]/g, "_")
+    .trim();
+  const safeFallback = fallback || "download";
+
+  return `${dispositionType}; filename="${safeFallback}"; filename*=UTF-8''${encodeURIComponent(
+    filename
+  )}`;
 }
 
 function encodeRemotePathForPreview(remotePath: string): string {
@@ -1014,6 +1085,79 @@ export function createRemoteViewerApp(
 ) {
   const app = express();
 
+  app.post("/api/upload", async (request, response) => {
+    let sftp: SFTPWrapper | null = null;
+    let targetPath = "";
+    let shouldCleanupPartial = false;
+
+    try {
+      const session = requireSession(String(request.query.sessionId || ""));
+      const remoteDir = String(request.query.dir || "").trim();
+      const requestedFileName = String(request.query.filename || "").trim();
+      const overwrite = String(request.query.overwrite || "").trim() === "1";
+
+      if (!remoteDir) {
+        throw new AppError("缺少上传目录", 400);
+      }
+
+      if (!requestedFileName) {
+        throw new AppError("缺少上传文件名", 400);
+      }
+
+      const fileName = normalizeUploadFileName(requestedFileName);
+
+      sftp = await openSftp(session.client);
+
+      const resolvedDir = await sftpRealpath(sftp, remoteDir);
+      const dirStats = await sftpStat(sftp, resolvedDir);
+
+      if (!dirStats.isDirectory()) {
+        throw new AppError("目标不是可写目录", 400);
+      }
+
+      targetPath = path.posix.join(resolvedDir, fileName);
+
+      if (!overwrite && (await sftpPathExists(sftp, targetPath))) {
+        throw new AppError(`远程已存在同名文件: ${fileName}`, 409);
+      }
+
+      const remoteStream = sftp.createWriteStream(targetPath, {
+        flags: "w",
+        mode: 0o644
+      });
+      let transferredBytes = 0;
+
+      request.on("data", (chunk: Buffer) => {
+        transferredBytes += chunk.length;
+      });
+
+      shouldCleanupPartial = true;
+      await pipeline(request, remoteStream);
+      shouldCleanupPartial = false;
+
+      response.status(201).json({
+        fileName,
+        path: targetPath,
+        size: transferredBytes
+      });
+    } catch (error) {
+      if (sftp && targetPath && shouldCleanupPartial) {
+        try {
+          await sftpUnlink(sftp, targetPath);
+        } catch {
+          // Ignore best-effort cleanup failures.
+        }
+      }
+
+      const appError = asAppError(error, "远程文件上传失败");
+      response.status(appError.statusCode).json({
+        error: appError.message
+      });
+    } finally {
+      sftp?.end();
+    }
+  });
+
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/api/health", (_request, response) => {
@@ -1140,7 +1284,7 @@ export function createRemoteViewerApp(
       response.setHeader("Content-Type", contentType);
       response.setHeader(
         "Content-Disposition",
-        `inline; filename="${encodeURIComponent(filename)}"`
+        buildContentDispositionHeader(filename, "inline")
       );
       response.setHeader("Cache-Control", "no-store");
 
@@ -1164,6 +1308,73 @@ export function createRemoteViewerApp(
       sftp?.end();
 
       const appError = asAppError(error, "远程文件读取失败");
+      response.status(appError.statusCode).json({
+        error: appError.message
+      });
+    }
+  });
+
+  app.get("/api/download", async (request, response) => {
+    let sftp: SFTPWrapper | null = null;
+
+    try {
+      const session = requireSession(String(request.query.sessionId || ""));
+      const remotePath = String(request.query.path || "").trim();
+
+      if (!remotePath) {
+        throw new AppError("缺少文件路径", 400);
+      }
+
+      sftp = await openSftp(session.client);
+      const resolvedPath = await sftpRealpath(sftp, remotePath);
+      const fileStats = await sftpStat(sftp, resolvedPath);
+
+      if (!fileStats.isFile()) {
+        throw new AppError("目标不是可下载文件", 400);
+      }
+
+      const filename = path.basename(resolvedPath);
+      const fileStream = sftp.createReadStream(resolvedPath);
+      let finished = false;
+
+      const cleanup = () => {
+        if (finished) {
+          return;
+        }
+
+        finished = true;
+        fileStream.destroy();
+        sftp?.end();
+      };
+
+      response.setHeader("Content-Type", getRemoteContentType(resolvedPath));
+      response.setHeader(
+        "Content-Disposition",
+        buildContentDispositionHeader(filename, "attachment")
+      );
+      response.setHeader("Content-Length", String(fileStats.size));
+      response.setHeader("Cache-Control", "no-store");
+
+      fileStream.on("error", (error: Error) => {
+        if (!response.headersSent) {
+          const appError = asAppError(error, "远程文件下载失败");
+          response.status(appError.statusCode).json({
+            error: appError.message
+          });
+        } else {
+          response.destroy(error);
+        }
+
+        cleanup();
+      });
+
+      response.on("close", cleanup);
+      fileStream.on("close", cleanup);
+      fileStream.pipe(response);
+    } catch (error) {
+      sftp?.end();
+
+      const appError = asAppError(error, "远程文件下载失败");
       response.status(appError.statusCode).json({
         error: appError.message
       });
