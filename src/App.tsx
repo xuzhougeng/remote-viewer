@@ -101,6 +101,10 @@ function buildDownloadUrl(session: ActiveSession, remotePath: string): string {
   })}`;
 }
 
+function isPasswordRelatedError(message: string): boolean {
+  return /密码|认证|authentication|permission denied/i.test(message);
+}
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
 
@@ -728,6 +732,17 @@ export default function App() {
     : "先填写 SSH 连接信息，再读取远程目录";
   const browserPathLabel = currentDir || "-";
   const selectedFilePath = selectedFile ? selectedFile.path : "尚未选择文件";
+  const passwordStatus = form.authMethod !== "password"
+    ? ""
+    : isConnecting
+      ? "正在校验用户名和密码…"
+      : error && isPasswordRelatedError(error)
+        ? error
+        : form.password
+          ? "点击“连接并读取目录”后会立即校验密码。"
+          : "请输入 SSH 密码。";
+  const isPasswordStatusError =
+    !isConnecting && Boolean(error) && isPasswordRelatedError(error);
 
   return (
     <div className={`shell theme-${theme}`}>
@@ -895,6 +910,13 @@ export default function App() {
                         type="password"
                         value={form.password}
                       />
+                      <small
+                        className={`field-note ${
+                          isPasswordStatusError ? "is-error" : ""
+                        }`}
+                      >
+                        {passwordStatus}
+                      </small>
                     </label>
                     <label className="checkbox-row">
                       <input

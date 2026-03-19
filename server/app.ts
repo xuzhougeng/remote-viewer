@@ -976,6 +976,49 @@ function getRemoteContentType(remotePath: string): string {
   }
 }
 
+function explainSshConnectError(
+  error: Error,
+  authMethod: AuthMethod
+): Error {
+  const rawMessage = error.message || "SSH 连接失败";
+  const normalizedMessage = rawMessage.toLowerCase();
+
+  if (
+    authMethod === "password" &&
+    (normalizedMessage.includes("all configured authentication methods failed") ||
+      normalizedMessage.includes("authentication failed") ||
+      normalizedMessage.includes("permission denied") ||
+      normalizedMessage.includes("unable to authenticate"))
+  ) {
+    return new Error("用户名或密码错误，SSH 认证失败，请检查后重试。");
+  }
+
+  if (
+    normalizedMessage.includes("timed out") ||
+    normalizedMessage.includes("timeout")
+  ) {
+    return new Error("SSH 连接超时，请确认主机、端口和网络是否可达。");
+  }
+
+  if (
+    normalizedMessage.includes("econnrefused") ||
+    normalizedMessage.includes("connection refused")
+  ) {
+    return new Error("SSH 连接被拒绝，请确认端口是否正确且远端 SSH 服务已启动。");
+  }
+
+  if (
+    normalizedMessage.includes("ehostunreach") ||
+    normalizedMessage.includes("enetunreach") ||
+    normalizedMessage.includes("getaddrinfo") ||
+    normalizedMessage.includes("not known")
+  ) {
+    return new Error("无法连接到目标主机，请检查主机地址、DNS 和网络配置。");
+  }
+
+  return new Error(rawMessage);
+}
+
 function createSession(
   target: ResolvedConnectionTarget
 ): Promise<SessionRecord> {
@@ -1035,12 +1078,18 @@ function createSession(
     });
 
     client.on("error", (error) => {
-      fail(new Error(error.message || "SSH 连接失败"));
+      fail(explainSshConnectError(error, target.authMethod));
     });
 
     client.on("close", () => {
       if (!settled) {
-        fail(new Error("SSH 连接已关闭"));
+        fail(
+          target.authMethod === "password"
+            ? new Error(
+                "SSH 连接已关闭，可能是用户名或密码错误，也可能是远端直接拒绝了认证。"
+              )
+            : new Error("SSH 连接已关闭")
+        );
       }
     });
 

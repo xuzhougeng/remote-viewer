@@ -339,6 +339,20 @@ select {
   gap: 0.45rem;
 }
 
+.field-note {
+  color: var(--color-text-soft);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.field-note.is-error {
+  color: #c14b36;
+}
+
+[data-theme="dark"] .field-note.is-error {
+  color: #ff9074;
+}
+
 .checkbox-row {
   flex-direction: row !important;
   align-items: center;
