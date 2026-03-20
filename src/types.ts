@@ -71,3 +71,15 @@ export type TextPreviewPayload =
       totalSize: number;
       truncated: boolean;
     };
+
+export type TerminalCommandResponse = {
+  command: string;
+  cwd: string;
+  exitCode: number | null;
+  signal: string | null;
+  stderr: string;
+  stderrTruncated: boolean;
+  stdout: string;
+  stdoutTruncated: boolean;
+  timedOut: boolean;
+};

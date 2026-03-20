@@ -8,6 +8,7 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import * as ssh2 from "ssh2";
 import type {
+  ClientChannel,
   ConnectConfig,
   FileEntryWithStats,
   SFTPWrapper,
@@ -23,6 +24,24 @@ type ConnectionConfig = {
   privateKey?: string;
   port?: string;
   username?: string;
+};
+
+type TerminalExecRequest = {
+  command: string;
+  cwd: string;
+  sessionId: string;
+};
+
+type TerminalExecResult = {
+  command: string;
+  cwd: string;
+  exitCode: number | null;
+  signal: string | null;
+  stderr: string;
+  stderrTruncated: boolean;
+  stdout: string;
+  stdoutTruncated: boolean;
+  timedOut: boolean;
 };
 
 type RemoteEntry = {
@@ -95,6 +114,8 @@ const largeTextPreviewMaxLines = 120;
 const tablePreviewMaxRows = 10;
 const appStorageDir = path.join(os.homedir(), ".remote-viewer");
 const savedProfilesFilePath = path.join(appStorageDir, "profiles.json");
+const terminalExecTimeoutMs = 20 * 1000;
+const terminalOutputLimitBytes = 128 * 1024;
 
 class AppError extends Error {
   statusCode: number;
@@ -628,6 +649,174 @@ async function resolveConnectionTarget(
     port,
     username
   };
+}
+
+function escapePosixShellArgument(value: string): string {
+  return "'".concat(value.replace(/'/g, "'\"'\"'"), "'");
+}
+
+function normalizeTerminalExecRequest(body: unknown): TerminalExecRequest {
+  const payload =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const sessionId = String(payload.sessionId || "").trim();
+  const command = String(payload.command || "").trim();
+  const cwd = String(payload.cwd || ".").trim() || ".";
+
+  if (!sessionId) {
+    throw new AppError("缺少会话 ID", 400);
+  }
+
+  if (!command) {
+    throw new AppError("请输入要执行的命令", 400);
+  }
+
+  return {
+    command,
+    cwd,
+    sessionId
+  };
+}
+
+type CapturedStreamState = {
+  chunks: Buffer[];
+  size: number;
+  truncated: boolean;
+};
+
+function appendCapturedChunk(
+  target: CapturedStreamState,
+  chunk: Buffer | string,
+  limit: number
+) {
+  const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+
+  if (!buffer.length) {
+    return;
+  }
+
+  if (target.size >= limit) {
+    target.truncated = true;
+    return;
+  }
+
+  const remaining = limit - target.size;
+
+  if (buffer.length > remaining) {
+    target.chunks.push(buffer.subarray(0, remaining));
+    target.size += remaining;
+    target.truncated = true;
+    return;
+  }
+
+  target.chunks.push(buffer);
+  target.size += buffer.length;
+}
+
+function executeRemoteCommand(
+  session: SessionRecord,
+  request: TerminalExecRequest
+): Promise<TerminalExecResult> {
+  return new Promise((resolve, reject) => {
+    const shellCommand = `cd -- ${escapePosixShellArgument(
+      request.cwd
+    )} && ${request.command}`;
+    const stdoutState: CapturedStreamState = {
+      chunks: [],
+      size: 0,
+      truncated: false
+    };
+    const stderrState: CapturedStreamState = {
+      chunks: [],
+      size: 0,
+      truncated: false
+    };
+    let channel: ClientChannel | null = null;
+    let exitCode: number | null = null;
+    let signal: string | null = null;
+    let settled = false;
+    let timedOut = false;
+
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+
+      if (!channel) {
+        return;
+      }
+
+      try {
+        channel.signal("TERM");
+      } catch {
+        // Ignore unsupported signal failures.
+      }
+
+      try {
+        channel.close();
+      } catch {
+        // Ignore close failures triggered by closed channels.
+      }
+    }, terminalExecTimeoutMs);
+
+    session.client.exec(
+      `sh -lc ${escapePosixShellArgument(shellCommand)}`,
+      (error, stream) => {
+        if (error || !stream) {
+          finish(() => reject(error || new Error("远程命令执行失败")));
+          return;
+        }
+
+        channel = stream;
+        stream.on("data", (chunk: Buffer | string) => {
+          appendCapturedChunk(stdoutState, chunk, terminalOutputLimitBytes);
+        });
+        stream.stderr.on("data", (chunk: Buffer | string) => {
+          appendCapturedChunk(stderrState, chunk, terminalOutputLimitBytes);
+        });
+        stream.on("exit", (...args: unknown[]) => {
+          if (typeof args[0] === "number") {
+            exitCode = args[0];
+            signal = null;
+            return;
+          }
+
+          exitCode = null;
+          signal =
+            typeof args[1] === "string"
+              ? args[1]
+              : typeof args[0] === "string"
+                ? args[0]
+                : null;
+        });
+        stream.on("error", (streamError: Error) => {
+          finish(() => reject(streamError));
+        });
+        stream.on("close", () => {
+          finish(() => {
+            resolve({
+              command: request.command,
+              cwd: request.cwd,
+              exitCode,
+              signal,
+              stderr: Buffer.concat(stderrState.chunks).toString("utf8"),
+              stderrTruncated: stderrState.truncated,
+              stdout: Buffer.concat(stdoutState.chunks).toString("utf8"),
+              stdoutTruncated: stdoutState.truncated,
+              timedOut
+            });
+          });
+        });
+      }
+    );
+  });
 }
 
 function openSftp(client: ssh2.Client): Promise<SFTPWrapper> {
@@ -1436,6 +1625,21 @@ export function createRemoteViewerApp(
   app.delete("/api/session/:sessionId", (request, response) => {
     destroySession(String(request.params.sessionId || "").trim());
     response.status(204).end();
+  });
+
+  app.post("/api/terminal/exec", async (request, response) => {
+    try {
+      const commandRequest = normalizeTerminalExecRequest(request.body);
+      const session = requireSession(commandRequest.sessionId);
+      const payload = await executeRemoteCommand(session, commandRequest);
+
+      response.json(payload);
+    } catch (error) {
+      const appError = asAppError(error, "远程命令执行失败");
+      response.status(appError.statusCode).json({
+        error: appError.message
+      });
+    }
   });
 
   app.get("/api/list", async (request, response) => {

@@ -10,6 +10,7 @@ import {
 import { HtmlPreview } from "./components/HtmlPreview";
 import { ImagePreview } from "./components/ImagePreview";
 import { PdfPreview } from "./components/PdfPreview";
+import { TerminalPanel } from "./components/TerminalPanel";
 import { TextPreview } from "./components/TextPreview";
 import type {
   ActiveSession,
@@ -20,6 +21,7 @@ import type {
 } from "./types";
 
 type ThemeMode = "light" | "dark";
+type ViewerMode = "preview" | "terminal";
 
 const defaultForm: ConnectionConfig = {
   authMethod: "key",
@@ -103,6 +105,28 @@ function buildDownloadUrl(session: ActiveSession, remotePath: string): string {
 
 function isPasswordRelatedError(message: string): boolean {
   return /密码|认证|authentication|permission denied/i.test(message);
+}
+
+function parseDownloadFileName(headerValue: string | null): string | null {
+  if (!headerValue) {
+    return null;
+  }
+
+  const encodedMatch = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1]);
+    } catch {
+      return encodedMatch[1];
+    }
+  }
+
+  const plainMatch =
+    headerValue.match(/filename="([^"]+)"/i) ||
+    headerValue.match(/filename=([^;]+)/i);
+
+  return plainMatch?.[1]?.trim() || null;
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -287,6 +311,7 @@ export default function App() {
   const privateKeyFileInputRef = useRef<HTMLInputElement | null>(null);
   const [form, setForm] = useState(defaultForm);
   const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
+  const [viewerMode, setViewerMode] = useState<ViewerMode>("preview");
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [savedProfiles, setSavedProfiles] = useState<SavedConnectionProfile[]>(
     []
@@ -308,9 +333,24 @@ export default function App() {
   const [transferNotice, setTransferNotice] = useState("");
   const [transferError, setTransferError] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadLoadedBytes, setDownloadLoadedBytes] = useState(0);
+  const [downloadTotalBytes, setDownloadTotalBytes] = useState<number | null>(
+    null
+  );
+  const [downloadFileName, setDownloadFileName] = useState("");
+  const [downloadError, setDownloadError] = useState("");
   const [isConnectionPanelCollapsed, setIsConnectionPanelCollapsed] =
     useState(false);
   const [isPending, startTransition] = useTransition();
+
+  function resetDownloadState() {
+    setIsDownloading(false);
+    setDownloadLoadedBytes(0);
+    setDownloadTotalBytes(null);
+    setDownloadFileName("");
+    setDownloadError("");
+  }
 
   useEffect(() => {
     void loadSavedProfiles();
@@ -592,6 +632,7 @@ export default function App() {
     setError("");
     setTransferNotice("");
     setTransferError("");
+    resetDownloadState();
 
     const previousSessionId = activeSession?.sessionId;
 
@@ -648,6 +689,7 @@ export default function App() {
         setFileFilter("");
         setPathDraft(form.rootPath);
         setSelectedFile(null);
+        setViewerMode("preview");
       });
 
       await loadDirectory(nextSession, form.rootPath, { clearSelection: true });
@@ -741,20 +783,105 @@ export default function App() {
     }
   }
 
-  function handleDownloadSelectedFile() {
-    if (!activeSession || !selectedFile) {
+  async function handleDownloadSelectedFile() {
+    if (!activeSession || !selectedFile || isDownloading) {
       return;
     }
 
-    const link = document.createElement("a");
-    link.href = buildDownloadUrl(activeSession, selectedFile.path);
-    link.download = selectedFile.name;
-    link.rel = "noopener";
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTransferError("");
-    setTransferNotice(`已开始下载 ${selectedFile.name}`);
+    setIsDownloading(true);
+    setDownloadError("");
+    setDownloadFileName(selectedFile.name);
+    setDownloadLoadedBytes(0);
+    setDownloadTotalBytes(selectedFile.size > 0 ? selectedFile.size : null);
+
+    try {
+      const response = await fetch(
+        buildDownloadUrl(activeSession, selectedFile.path)
+      );
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(payload?.error || `下载失败: ${response.status}`);
+      }
+
+      const parsedFileName =
+        parseDownloadFileName(response.headers.get("Content-Disposition")) ||
+        selectedFile.name;
+      const contentLength = Number(response.headers.get("Content-Length") || "");
+      const totalBytes =
+        Number.isFinite(contentLength) && contentLength > 0
+          ? contentLength
+          : selectedFile.size > 0
+            ? selectedFile.size
+            : null;
+      const contentType =
+        response.headers.get("Content-Type") || "application/octet-stream";
+      let receivedBytes = 0;
+      let blob: Blob;
+
+      setDownloadFileName(parsedFileName);
+      setDownloadTotalBytes(totalBytes);
+
+      if (response.body) {
+        const reader = response.body.getReader();
+        const chunks: ArrayBuffer[] = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) {
+            break;
+          }
+
+          if (!value) {
+            continue;
+          }
+
+          const chunk = Uint8Array.from(value);
+
+          chunks.push(chunk.buffer.slice(0) as ArrayBuffer);
+          receivedBytes += chunk.byteLength;
+          setDownloadLoadedBytes(receivedBytes);
+        }
+
+        blob = new Blob(chunks, {
+          type: contentType
+        });
+      } else {
+        blob = await response.blob();
+        receivedBytes = blob.size;
+        setDownloadLoadedBytes(receivedBytes);
+      }
+
+      const finalTotalBytes = totalBytes ?? receivedBytes;
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      setDownloadLoadedBytes(receivedBytes);
+      setDownloadTotalBytes(finalTotalBytes);
+
+      link.href = objectUrl;
+      link.download = parsedFileName;
+      link.rel = "noopener";
+      document.body.append(link);
+      link.click();
+      link.remove();
+
+      window.setTimeout(() => {
+        window.URL.revokeObjectURL(objectUrl);
+      }, 1000);
+    } catch (downloadFailure) {
+      resetDownloadState();
+      setDownloadError(
+        downloadFailure instanceof Error
+          ? downloadFailure.message
+          : "文件下载失败"
+      );
+    } finally {
+      setIsDownloading(false);
+    }
   }
 
   const selectedPreviewKind = !selectedFile
@@ -821,6 +948,7 @@ export default function App() {
   const selectedProfile = savedProfiles.find(
     (profile) => profile.id === selectedProfileId
   );
+  const viewerTitle = viewerMode === "terminal" ? "终端区" : "预览区";
   const sessionSummary = activeSession
     ? `${activeSession.username}@${activeSession.hostname}:${activeSession.port}`
     : "";
@@ -831,7 +959,23 @@ export default function App() {
       ? `已选择配置：${selectedProfile.name}`
       : "先填写 SSH 连接信息，再读取远程目录";
   const browserPathLabel = currentDir || "-";
-  const selectedFilePath = selectedFile ? selectedFile.path : "尚未选择文件";
+  const viewerPathLabel =
+    viewerMode === "terminal"
+      ? activeSession
+        ? currentDir || activeSession.rootPath || "/"
+        : "先建立 SSH 会话后再执行命令"
+      : selectedFile
+        ? selectedFile.path
+        : "尚未选择文件";
+  const downloadProgressPercent =
+    downloadTotalBytes && downloadTotalBytes > 0
+      ? Math.min(downloadLoadedBytes / downloadTotalBytes, 1) * 100
+      : null;
+  const downloadProgressLabel = downloadTotalBytes
+    ? `${formatSize(downloadLoadedBytes)} / ${formatSize(downloadTotalBytes)}`
+    : downloadLoadedBytes
+      ? formatSize(downloadLoadedBytes)
+      : "准备下载";
   const passwordStatus = form.authMethod !== "password"
     ? ""
     : isConnecting
@@ -855,7 +999,7 @@ export default function App() {
                 <div className="topbar-pills">
                   <span>SSH2</span>
                   <span>Key / Password</span>
-                  <span>上传 · 下载 · 预览</span>
+                  <span>上传 · 下载 · 预览 · 命令</span>
                 </div>
                 <button
                   className="theme-toggle"
@@ -869,7 +1013,7 @@ export default function App() {
               </div>
             </div>
             <p className="topbar-note">
-            通过 `ssh2` 建立远程会话，连接配置和 SSH Key 由应用自己管理，不再依赖本机 `.ssh` 配置；同时支持上传、下载和多种文件预览。
+            通过 `ssh2` 建立远程会话，连接配置和 SSH Key 由应用自己管理，不再依赖本机 `.ssh` 配置；右侧区域现在可以在文件预览和远程命令区之间切换。
             </p>
           </div>
         </header>
@@ -1127,8 +1271,10 @@ export default function App() {
                       setFileFilter("");
                       setTransferNotice("");
                       setTransferError("");
+                      resetDownloadState();
                       setPathDraft(form.rootPath);
                       setSelectedFile(null);
+                      setViewerMode("preview");
                       setIsConnectionPanelCollapsed(false);
                     }}
                     type="button"
@@ -1282,6 +1428,7 @@ export default function App() {
                       setSelectedFile(entry);
                       setZoom(1);
                       setFitToWidth(true);
+                      setViewerMode("preview");
                     }}
                     type="button"
                   >
@@ -1302,58 +1449,126 @@ export default function App() {
         <section className="viewer-column">
           <div className="panel viewer-toolbar light-panel">
             <div className="viewer-heading">
-              <div className="section-title">预览区</div>
-              <div className="viewer-file-name" title={selectedFilePath}>
-                {selectedFilePath}
+              <div className="viewer-title-row">
+                <div className="section-title">{viewerTitle}</div>
+                <div
+                  aria-label="右侧视图切换"
+                  className="viewer-mode-switch"
+                  role="tablist"
+                >
+                  <button
+                    aria-selected={viewerMode === "preview"}
+                    className={viewerMode === "preview" ? "is-active" : ""}
+                    onClick={() => setViewerMode("preview")}
+                    role="tab"
+                    type="button"
+                  >
+                    预览
+                  </button>
+                  <button
+                    aria-selected={viewerMode === "terminal"}
+                    className={viewerMode === "terminal" ? "is-active" : ""}
+                    onClick={() => setViewerMode("terminal")}
+                    role="tab"
+                    type="button"
+                  >
+                    终端
+                  </button>
+                </div>
+              </div>
+              <div className="viewer-file-name" title={viewerPathLabel}>
+                {viewerPathLabel}
               </div>
             </div>
             <div className="viewer-controls">
-              <button
-                disabled={!selectedFile}
-                onClick={handleDownloadSelectedFile}
-                type="button"
-              >
-                下载
-              </button>
-              <button
-                disabled={!selectedFile}
-                onClick={() => setZoom((value) => Math.max(value - 0.1, 0.2))}
-                type="button"
-              >
-                缩小
-              </button>
-              <button
-                disabled={!selectedFile}
-                onClick={() => setZoom(1)}
-                type="button"
-              >
-                100%
-              </button>
-              <button
-                disabled={!selectedFile}
-                onClick={() => setZoom((value) => Math.min(value + 0.1, 4))}
-                type="button"
-              >
-                放大
-              </button>
-              <button
-                className={fitToWidth ? "is-toggled" : ""}
-                disabled={!selectedFile}
-                onClick={() => setFitToWidth((value) => !value)}
-                type="button"
-              >
-                {fitToWidth ? "已适配宽度" : "适配宽度"}
-              </button>
-              <span className="zoom-badge">{Math.round(zoom * 100)}%</span>
+              {viewerMode === "preview" ? (
+                <>
+                  <button
+                    disabled={!selectedFile || isDownloading}
+                    onClick={() => {
+                      void handleDownloadSelectedFile();
+                    }}
+                    type="button"
+                  >
+                    {isDownloading ? "下载中" : "下载"}
+                  </button>
+                  <button
+                    disabled={!selectedFile}
+                    onClick={() => setZoom((value) => Math.max(value - 0.1, 0.2))}
+                    type="button"
+                  >
+                    缩小
+                  </button>
+                  <button
+                    disabled={!selectedFile}
+                    onClick={() => setZoom(1)}
+                    type="button"
+                  >
+                    100%
+                  </button>
+                  <button
+                    disabled={!selectedFile}
+                    onClick={() => setZoom((value) => Math.min(value + 0.1, 4))}
+                    type="button"
+                  >
+                    放大
+                  </button>
+                  <button
+                    className={fitToWidth ? "is-toggled" : ""}
+                    disabled={!selectedFile}
+                    onClick={() => setFitToWidth((value) => !value)}
+                    type="button"
+                  >
+                    {fitToWidth ? "已适配宽度" : "适配宽度"}
+                  </button>
+                  <span className="zoom-badge">{Math.round(zoom * 100)}%</span>
+                </>
+              ) : (
+                <span className="viewer-mode-note">命令在当前目录执行</span>
+              )}
             </div>
+            {downloadError ? (
+              <div className="download-feedback panel-error">
+                {downloadError}
+              </div>
+            ) : null}
+            {!downloadError && (isDownloading || downloadLoadedBytes > 0) ? (
+              <div className="download-feedback">
+                <div className="download-progress-meta">
+                  <strong>
+                    {isDownloading ? "正在下载" : "下载完成"}
+                    {downloadFileName ? ` · ${downloadFileName}` : ""}
+                  </strong>
+                  <span>{downloadProgressLabel}</span>
+                </div>
+                <div className="download-progress-track" aria-hidden="true">
+                  <div
+                    className={`download-progress-fill ${
+                      downloadProgressPercent === null && isDownloading
+                        ? "is-indeterminate"
+                        : ""
+                    }`}
+                    style={
+                      downloadProgressPercent === null
+                        ? undefined
+                        : {
+                            width: `${downloadProgressPercent}%`
+                          }
+                    }
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <section className="panel viewer-panel light-panel">
             {isPending ? <div className="viewer-status">目录状态更新中</div> : null}
 
-            {!selectedFile ? (
+            {viewerMode === "terminal" ? (
+              <TerminalPanel currentDir={currentDir} session={activeSession} />
+            ) : !selectedFile ? (
               <div className="viewer-placeholder">
-                选择左侧文件后，会在这里显示 PDF、PNG、HTML 或文本预览。
+                选择左侧文件后，会在这里显示 PDF、PNG、HTML 或文本预览；也可以切到终端区执行远程命令。
               </div>
             ) : selectedPreviewKind === "pdf" ? (
               <PdfPreview
