@@ -594,9 +594,18 @@ select {
 
 .download-progress-meta {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
+}
+
+.download-progress-copy {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .download-progress-meta strong {
@@ -608,9 +617,17 @@ select {
   white-space: nowrap;
 }
 
+.download-progress-copy small {
+  color: var(--color-text-soft);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
 .download-progress-meta span {
   color: var(--color-text-soft);
   font-size: 0.82rem;
+  margin-left: auto;
+  text-align: right;
   white-space: nowrap;
 }
 

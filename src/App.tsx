@@ -22,6 +22,7 @@ import type {
 
 type ThemeMode = "light" | "dark";
 type ViewerMode = "preview" | "terminal";
+type DownloadStatus = "idle" | "downloading" | "completed" | "cancelled";
 
 const defaultForm: ConnectionConfig = {
   authMethod: "key",
@@ -185,6 +186,46 @@ function formatSize(size: number): string {
   return `${current.toFixed(current >= 100 || unit === "B" ? 0 : 1)} ${unit}`;
 }
 
+function formatDuration(totalSeconds: number): string {
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+    return "少于 1 秒";
+  }
+
+  const seconds = Math.max(1, Math.ceil(totalSeconds));
+
+  if (seconds < 60) {
+    return `${seconds} 秒`;
+  }
+
+  if (seconds < 3600) {
+    const minutes = Math.floor(seconds / 60);
+    const remainSeconds = seconds % 60;
+
+    return remainSeconds === 0
+      ? `${minutes} 分钟`
+      : `${minutes} 分 ${remainSeconds} 秒`;
+  }
+
+  const hours = Math.floor(seconds / 3600);
+  const remainMinutes = Math.floor((seconds % 3600) / 60);
+
+  return remainMinutes === 0
+    ? `${hours} 小时`
+    : `${hours} 小时 ${remainMinutes} 分`;
+}
+
+function formatTransferRate(bytesPerSecond: number | null): string {
+  if (
+    bytesPerSecond === null ||
+    !Number.isFinite(bytesPerSecond) ||
+    bytesPerSecond <= 0
+  ) {
+    return "";
+  }
+
+  return `${formatSize(bytesPerSecond)}/s`;
+}
+
 function createPasswordStorageKey(host: string, username: string): string {
   const normalizedHost = host.trim();
   const normalizedUsername = username.trim();
@@ -309,6 +350,8 @@ function formatEntrySummary(entry: RemoteEntry): string {
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const privateKeyFileInputRef = useRef<HTMLInputElement | null>(null);
+  const downloadAbortControllerRef = useRef<AbortController | null>(null);
+  const downloadRequestIdRef = useRef(0);
   const [form, setForm] = useState(defaultForm);
   const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
   const [viewerMode, setViewerMode] = useState<ViewerMode>("preview");
@@ -334,22 +377,54 @@ export default function App() {
   const [transferError, setTransferError] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadStatus, setDownloadStatus] =
+    useState<DownloadStatus>("idle");
   const [downloadLoadedBytes, setDownloadLoadedBytes] = useState(0);
   const [downloadTotalBytes, setDownloadTotalBytes] = useState<number | null>(
     null
   );
   const [downloadFileName, setDownloadFileName] = useState("");
   const [downloadError, setDownloadError] = useState("");
+  const [downloadSpeedBytesPerSecond, setDownloadSpeedBytesPerSecond] =
+    useState<number | null>(null);
+  const [downloadEtaSeconds, setDownloadEtaSeconds] = useState<number | null>(
+    null
+  );
   const [isConnectionPanelCollapsed, setIsConnectionPanelCollapsed] =
     useState(false);
   const [isPending, startTransition] = useTransition();
 
+  function abortActiveDownload() {
+    const controller = downloadAbortControllerRef.current;
+
+    downloadAbortControllerRef.current = null;
+    controller?.abort();
+  }
+
   function resetDownloadState() {
     setIsDownloading(false);
+    setDownloadStatus("idle");
     setDownloadLoadedBytes(0);
     setDownloadTotalBytes(null);
     setDownloadFileName("");
     setDownloadError("");
+    setDownloadSpeedBytesPerSecond(null);
+    setDownloadEtaSeconds(null);
+  }
+
+  function stopDownload(options?: { reset?: boolean }) {
+    downloadRequestIdRef.current += 1;
+    abortActiveDownload();
+
+    if (options?.reset) {
+      resetDownloadState();
+      return;
+    }
+
+    setIsDownloading(false);
+    setDownloadStatus("cancelled");
+    setDownloadError("");
+    setDownloadEtaSeconds(null);
   }
 
   useEffect(() => {
@@ -395,6 +470,13 @@ export default function App() {
       };
     });
   }, [form.authMethod, form.host, form.username]);
+
+  useEffect(() => {
+    return () => {
+      downloadRequestIdRef.current += 1;
+      abortActiveDownload();
+    };
+  }, []);
 
   async function loadSavedProfiles(nextSelectedProfileId?: string) {
     setIsLoadingProfiles(true);
@@ -632,7 +714,7 @@ export default function App() {
     setError("");
     setTransferNotice("");
     setTransferError("");
-    resetDownloadState();
+    stopDownload({ reset: true });
 
     const previousSessionId = activeSession?.sessionId;
 
@@ -788,15 +870,27 @@ export default function App() {
       return;
     }
 
+    const controller = new AbortController();
+    const requestId = downloadRequestIdRef.current + 1;
+    const downloadStartedAt = performance.now();
+
+    downloadRequestIdRef.current = requestId;
+    downloadAbortControllerRef.current = controller;
     setIsDownloading(true);
+    setDownloadStatus("downloading");
     setDownloadError("");
     setDownloadFileName(selectedFile.name);
     setDownloadLoadedBytes(0);
     setDownloadTotalBytes(selectedFile.size > 0 ? selectedFile.size : null);
+    setDownloadSpeedBytesPerSecond(null);
+    setDownloadEtaSeconds(null);
 
     try {
       const response = await fetch(
-        buildDownloadUrl(activeSession, selectedFile.path)
+        buildDownloadUrl(activeSession, selectedFile.path),
+        {
+          signal: controller.signal
+        }
       );
 
       if (!response.ok) {
@@ -824,6 +918,35 @@ export default function App() {
       setDownloadFileName(parsedFileName);
       setDownloadTotalBytes(totalBytes);
 
+      const ensureDownloadIsActive = () => {
+        if (
+          downloadRequestIdRef.current !== requestId ||
+          controller.signal.aborted
+        ) {
+          throw new DOMException("下载已停止", "AbortError");
+        }
+      };
+
+      const updateDownloadTiming = (nextLoadedBytes: number) => {
+        ensureDownloadIsActive();
+        setDownloadLoadedBytes(nextLoadedBytes);
+
+        const elapsedSeconds = (performance.now() - downloadStartedAt) / 1000;
+
+        if (elapsedSeconds < 0.25 || nextLoadedBytes <= 0) {
+          return;
+        }
+
+        const nextSpeed = nextLoadedBytes / elapsedSeconds;
+
+        setDownloadSpeedBytesPerSecond(nextSpeed);
+        setDownloadEtaSeconds(
+          totalBytes && totalBytes > nextLoadedBytes
+            ? (totalBytes - nextLoadedBytes) / nextSpeed
+            : null
+        );
+      };
+
       if (response.body) {
         const reader = response.body.getReader();
         const chunks: ArrayBuffer[] = [];
@@ -835,6 +958,8 @@ export default function App() {
             break;
           }
 
+          ensureDownloadIsActive();
+
           if (!value) {
             continue;
           }
@@ -843,7 +968,7 @@ export default function App() {
 
           chunks.push(chunk.buffer.slice(0) as ArrayBuffer);
           receivedBytes += chunk.byteLength;
-          setDownloadLoadedBytes(receivedBytes);
+          updateDownloadTiming(receivedBytes);
         }
 
         blob = new Blob(chunks, {
@@ -852,15 +977,25 @@ export default function App() {
       } else {
         blob = await response.blob();
         receivedBytes = blob.size;
-        setDownloadLoadedBytes(receivedBytes);
+        updateDownloadTiming(receivedBytes);
       }
 
       const finalTotalBytes = totalBytes ?? receivedBytes;
+
+      ensureDownloadIsActive();
       const objectUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
 
       setDownloadLoadedBytes(receivedBytes);
       setDownloadTotalBytes(finalTotalBytes);
+      setDownloadStatus("completed");
+      setDownloadEtaSeconds(0);
+
+      const elapsedSeconds = (performance.now() - downloadStartedAt) / 1000;
+
+      if (elapsedSeconds > 0 && receivedBytes > 0) {
+        setDownloadSpeedBytesPerSecond(receivedBytes / elapsedSeconds);
+      }
 
       link.href = objectUrl;
       link.download = parsedFileName;
@@ -873,6 +1008,10 @@ export default function App() {
         window.URL.revokeObjectURL(objectUrl);
       }, 1000);
     } catch (downloadFailure) {
+      if (controller.signal.aborted || downloadRequestIdRef.current !== requestId) {
+        return;
+      }
+
       resetDownloadState();
       setDownloadError(
         downloadFailure instanceof Error
@@ -880,7 +1019,10 @@ export default function App() {
           : "文件下载失败"
       );
     } finally {
-      setIsDownloading(false);
+      if (downloadRequestIdRef.current === requestId) {
+        setIsDownloading(false);
+        downloadAbortControllerRef.current = null;
+      }
     }
   }
 
@@ -976,6 +1118,32 @@ export default function App() {
     : downloadLoadedBytes
       ? formatSize(downloadLoadedBytes)
       : "准备下载";
+  const downloadSpeedLabel = formatTransferRate(downloadSpeedBytesPerSecond);
+  const downloadStatusLabel =
+    downloadStatus === "downloading"
+      ? "正在下载"
+      : downloadStatus === "completed"
+        ? "下载完成"
+        : downloadStatus === "cancelled"
+          ? "下载已停止"
+          : "";
+  const downloadEstimateLabel =
+    downloadEtaSeconds !== null &&
+    downloadEtaSeconds > 0 &&
+    downloadTotalBytes !== null
+      ? `预计剩余 ${formatDuration(downloadEtaSeconds)}`
+      : "";
+  const downloadDetailLabel =
+    downloadStatus === "downloading"
+      ? [downloadSpeedLabel, downloadEstimateLabel].filter(Boolean).join(" · ") ||
+        "正在计算下载速度"
+      : downloadStatus === "completed"
+        ? downloadSpeedLabel
+          ? `平均速度 ${downloadSpeedLabel}`
+          : "文件已交给浏览器保存"
+        : downloadStatus === "cancelled"
+          ? "下载已停止，可重新开始"
+          : "";
   const passwordStatus = form.authMethod !== "password"
     ? ""
     : isConnecting
@@ -1271,7 +1439,7 @@ export default function App() {
                       setFileFilter("");
                       setTransferNotice("");
                       setTransferError("");
-                      resetDownloadState();
+                      stopDownload({ reset: true });
                       setPathDraft(form.rootPath);
                       setSelectedFile(null);
                       setViewerMode("preview");
@@ -1492,6 +1660,16 @@ export default function App() {
                   >
                     {isDownloading ? "下载中" : "下载"}
                   </button>
+                  {isDownloading ? (
+                    <button
+                      onClick={() => {
+                        stopDownload();
+                      }}
+                      type="button"
+                    >
+                      停止
+                    </button>
+                  ) : null}
                   <button
                     disabled={!selectedFile}
                     onClick={() => setZoom((value) => Math.max(value - 0.1, 0.2))}
@@ -1532,19 +1710,23 @@ export default function App() {
                 {downloadError}
               </div>
             ) : null}
-            {!downloadError && (isDownloading || downloadLoadedBytes > 0) ? (
+            {!downloadError && downloadStatus !== "idle" ? (
               <div className="download-feedback">
                 <div className="download-progress-meta">
-                  <strong>
-                    {isDownloading ? "正在下载" : "下载完成"}
-                    {downloadFileName ? ` · ${downloadFileName}` : ""}
-                  </strong>
+                  <div className="download-progress-copy">
+                    <strong>
+                      {downloadStatusLabel}
+                      {downloadFileName ? ` · ${downloadFileName}` : ""}
+                    </strong>
+                    {downloadDetailLabel ? <small>{downloadDetailLabel}</small> : null}
+                  </div>
                   <span>{downloadProgressLabel}</span>
                 </div>
                 <div className="download-progress-track" aria-hidden="true">
                   <div
                     className={`download-progress-fill ${
-                      downloadProgressPercent === null && isDownloading
+                      downloadProgressPercent === null &&
+                      downloadStatus === "downloading"
                         ? "is-indeterminate"
                         : ""
                     }`}
