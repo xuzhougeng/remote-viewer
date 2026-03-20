@@ -4,6 +4,7 @@ export type ConnectionConfig = {
   authMethod: AuthMethod;
   host: string;
   password: string;
+  privateKey: string;
   port: string;
   rememberPassword: boolean;
   rootPath: string;
@@ -29,11 +30,6 @@ export type ConnectionSessionResponse = {
   username: string;
 };
 
-export type ConfiguredSshHost = {
-  alias: string;
-  source: string;
-};
-
 export type RemoteEntry = {
   extension?: string;
   kind: "directory" | "file";
@@ -42,12 +38,15 @@ export type RemoteEntry = {
   size: number;
 };
 
-export type ResolvedSshHost = {
-  alias: string;
-  hostname?: string;
-  identityFiles: string[];
-  port?: string;
-  user?: string;
+export type SavedConnectionProfile = {
+  authMethod: AuthMethod;
+  host: string;
+  id: string;
+  name: string;
+  port: string;
+  privateKey: string;
+  rootPath: string;
+  username: string;
 };
 
 export type TextPreviewPayload =

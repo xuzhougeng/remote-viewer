@@ -126,7 +126,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -157,13 +158,19 @@ button:disabled {
 }
 
 input:not([type="checkbox"]),
-select {
+select,
+textarea {
   width: 100%;
   border: 1px solid var(--color-field-border);
   border-radius: 16px;
   background: var(--color-field-bg);
   color: var(--color-text);
   padding: 0.78rem 0.92rem;
+}
+
+textarea {
+  min-height: 10rem;
+  resize: vertical;
 }
 
 input::placeholder {

@@ -20,6 +20,7 @@ type ConnectionConfig = {
   authMethod: AuthMethod;
   host: string;
   password?: string;
+  privateKey?: string;
   port?: string;
   username?: string;
 };
@@ -55,6 +56,19 @@ type ResolvedConnectionTarget = {
   password?: string;
 };
 
+type SavedConnectionProfile = {
+  authMethod: AuthMethod;
+  createdAt: number;
+  host: string;
+  id: string;
+  name: string;
+  port: string;
+  privateKey: string;
+  rootPath: string;
+  updatedAt: number;
+  username: string;
+};
+
 type ServerOptions = {
   clientDist?: string | null;
   host?: string;
@@ -79,6 +93,8 @@ const largeTextPreviewThresholdBytes = 10 * 1024 * 1024;
 const largeTextPreviewMaxBytes = 256 * 1024;
 const largeTextPreviewMaxLines = 120;
 const tablePreviewMaxRows = 10;
+const appStorageDir = path.join(os.homedir(), ".remote-viewer");
+const savedProfilesFilePath = path.join(appStorageDir, "profiles.json");
 
 class AppError extends Error {
   statusCode: number;
@@ -88,6 +104,98 @@ class AppError extends Error {
     this.name = "AppError";
     this.statusCode = statusCode;
   }
+}
+
+function ensureAppStorageDir() {
+  fs.mkdirSync(appStorageDir, {
+    mode: 0o700,
+    recursive: true
+  });
+}
+
+function writeJsonFile(targetPath: string, content: unknown) {
+  ensureAppStorageDir();
+  const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+
+  fs.writeFileSync(tempPath, `${JSON.stringify(content, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600
+  });
+  fs.renameSync(tempPath, targetPath);
+}
+
+function readSavedConnectionProfiles(): SavedConnectionProfile[] {
+  if (!fs.existsSync(savedProfilesFilePath)) {
+    return [];
+  }
+
+  try {
+    const raw = fs.readFileSync(savedProfilesFilePath, "utf8");
+    const payload = JSON.parse(raw) as { profiles?: SavedConnectionProfile[] };
+    const profiles = Array.isArray(payload.profiles) ? payload.profiles : [];
+
+    return profiles.sort((left, right) =>
+      left.name.localeCompare(right.name, "zh-CN", {
+        numeric: true,
+        sensitivity: "base"
+      })
+    );
+  } catch (error) {
+    throw asAppError(error, "应用内 SSH 配置读取失败");
+  }
+}
+
+function writeSavedConnectionProfiles(profiles: SavedConnectionProfile[]) {
+  writeJsonFile(savedProfilesFilePath, {
+    profiles
+  });
+}
+
+function normalizeSavedConnectionProfile(
+  body: unknown
+): Omit<SavedConnectionProfile, "createdAt" | "id" | "updatedAt"> & {
+  id?: string;
+} {
+  const payload =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const authMethod =
+    String(payload.authMethod || "key").trim() === "password"
+      ? "password"
+      : "key";
+  const name = String(payload.name || "").trim();
+  const host = String(payload.host || "").trim();
+  const port = String(payload.port || "22").trim() || "22";
+  const username = String(payload.username || "").trim();
+  const rootPath = String(payload.rootPath || "/").trim() || "/";
+  const privateKey = String(payload.privateKey || "");
+  const id = String(payload.id || "").trim() || undefined;
+
+  if (!name) {
+    throw new AppError("请填写配置名称", 400);
+  }
+
+  if (!host) {
+    throw new AppError("请填写 SSH 主机地址", 400);
+  }
+
+  if (!username) {
+    throw new AppError("请填写 SSH 用户名", 400);
+  }
+
+  if (authMethod === "key" && !privateKey.trim()) {
+    throw new AppError("SSH Key 配置需要填写私钥内容", 400);
+  }
+
+  return {
+    authMethod,
+    host,
+    id,
+    name,
+    port,
+    privateKey: authMethod === "key" ? privateKey : "",
+    rootPath,
+    username
+  };
 }
 
 const cleanupTimer = setInterval(() => {
@@ -424,6 +532,7 @@ function normalizeConnection(body: unknown): ConnectionConfig {
   const port = String(payload.port || "").trim();
   const username = String(payload.username || "").trim();
   const password = String(payload.password || "");
+  const privateKey = String(payload.privateKey || "");
 
   if (!host) {
     throw new AppError("缺少 SSH 主机信息", 400);
@@ -433,10 +542,15 @@ function normalizeConnection(body: unknown): ConnectionConfig {
     throw new AppError("密码登录需要填写密码", 400);
   }
 
+  if (authMethod === "key" && !privateKey.trim()) {
+    throw new AppError("SSH Key 登录需要提供私钥内容", 400);
+  }
+
   return {
     authMethod,
     host,
     password: password || undefined,
+    privateKey: privateKey || undefined,
     port: port || undefined,
     username: username || undefined
   };
@@ -482,10 +596,9 @@ function resolvePrivateKey(
 async function resolveConnectionTarget(
   connection: ConnectionConfig
 ): Promise<ResolvedConnectionTarget> {
-  const resolvedHost = await resolveConfiguredHostSafely(connection.host);
-  const hostname = resolvedHost?.hostname || connection.host;
-  const username = connection.username || resolvedHost?.user || "";
-  const port = resolvePort(connection.port || resolvedHost?.port);
+  const hostname = connection.host;
+  const username = connection.username || "";
+  const port = resolvePort(connection.port);
 
   if (!username) {
     throw new AppError("缺少 SSH 用户名", 400);
@@ -504,11 +617,10 @@ async function resolveConnectionTarget(
     connectConfig.password = connection.password;
     connectConfig.tryKeyboard = true;
   } else {
-    Object.assign(connectConfig, resolvePrivateKey(resolvedHost));
+    connectConfig.privateKey = connection.privateKey;
   }
 
   return {
-    alias: resolvedHost ? connection.host : undefined,
     authMethod: connection.authMethod,
     connectConfig,
     hostname,
@@ -1214,22 +1326,85 @@ export function createRemoteViewerApp(
   });
 
   app.get("/api/ssh/hosts", (_request, response) => {
-    response.json({
-      hosts: readConfiguredSshHosts()
+    response.status(410).json({
+      error: "已停用本机 SSH 配置读取，请改用应用内保存的连接配置。"
     });
   });
 
-  app.get("/api/ssh/resolve", async (request, response) => {
-    try {
-      const alias = String(request.query.alias || "").trim();
+  app.get("/api/ssh/resolve", (_request, response) => {
+    response.status(410).json({
+      error: "已停用本机 SSH 配置解析，请直接填写主机地址，或使用应用内保存的连接配置。"
+    });
+  });
 
-      if (!alias) {
-        throw new AppError("缺少 SSH Host Alias", 400);
+  app.get("/api/profiles", (_request, response) => {
+    response.json({
+      profiles: readSavedConnectionProfiles()
+    });
+  });
+
+  app.post("/api/profiles", (request, response) => {
+    try {
+      const draft = normalizeSavedConnectionProfile(request.body);
+      const now = Date.now();
+      const profiles = readSavedConnectionProfiles();
+      const existingIndex = draft.id
+        ? profiles.findIndex((profile) => profile.id === draft.id)
+        : -1;
+
+      const nextProfile: SavedConnectionProfile =
+        existingIndex >= 0
+          ? {
+              ...profiles[existingIndex],
+              ...draft,
+              id: profiles[existingIndex].id,
+              updatedAt: now
+            }
+          : {
+              ...draft,
+              createdAt: now,
+              id: crypto.randomUUID(),
+              updatedAt: now
+            };
+
+      if (existingIndex >= 0) {
+        profiles.splice(existingIndex, 1, nextProfile);
+      } else {
+        profiles.push(nextProfile);
       }
 
-      response.json(await resolveConfiguredHost(alias));
+      writeSavedConnectionProfiles(profiles);
+
+      response.status(existingIndex >= 0 ? 200 : 201).json({
+        profile: nextProfile
+      });
     } catch (error) {
-      const appError = asAppError(error, "SSH 配置解析失败");
+      const appError = asAppError(error, "应用内 SSH 配置保存失败");
+      response.status(appError.statusCode).json({
+        error: appError.message
+      });
+    }
+  });
+
+  app.delete("/api/profiles/:profileId", (request, response) => {
+    try {
+      const profileId = String(request.params.profileId || "").trim();
+
+      if (!profileId) {
+        throw new AppError("缺少配置 ID", 400);
+      }
+
+      const profiles = readSavedConnectionProfiles();
+      const nextProfiles = profiles.filter((profile) => profile.id !== profileId);
+
+      if (nextProfiles.length === profiles.length) {
+        throw new AppError("应用内 SSH 配置不存在", 404);
+      }
+
+      writeSavedConnectionProfiles(nextProfiles);
+      response.status(204).end();
+    } catch (error) {
+      const appError = asAppError(error, "应用内 SSH 配置删除失败");
       response.status(appError.statusCode).json({
         error: appError.message
       });

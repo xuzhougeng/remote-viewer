@@ -1,6 +1,6 @@
 # Remote Viewer
 
-一个最小可用的远程文件浏览器，通过 `ssh2` 连接远端服务器，浏览目录、上传本地文件、下载远程文件，并在 Web 界面中预览 PDF、图片、HTML 与文本内容。当前同时支持浏览器运行，以及 Electron 桌面壳方式运行。
+一个最小可用的远程文件浏览器，通过 `ssh2` 连接远端服务器，浏览目录、上传本地文件、下载远程文件，并在 Web 界面中预览 PDF、图片、HTML 与文本内容。SSH 连接配置和 SSH Key 由应用自己管理，不再依赖本机 `.ssh` 配置。当前同时支持浏览器运行，以及 Electron 桌面壳方式运行。
 
 ## 已实现的核心能力
 
@@ -17,12 +17,11 @@
 ## 设计取舍
 
 - 当前版本通过 `ssh2` 建立 SSH/SFTP 会话
-- 如果你希望直接复用本机 `~/.ssh/config` 的 Host Alias / IdentityFile，仍建议本机有可用的 `ssh`
-- 网页端会读取本机 `~/.ssh/config` 中的 Host Alias，便于直接选择已配置主机
+- 应用内配置保存在 `~/.remote-viewer/profiles.json`，与本机 `.ssh` 配置隔离
+- SSH Key 登录直接使用应用内保存或手动导入的私钥内容，不依赖 `IdentityFile` / `SSH_AUTH_SOCK`
 - 支持密码登录；密码可选择保存在本机浏览器 `localStorage`
-- SSH Key 模式会优先使用 `~/.ssh/config` 中解析出的 `IdentityFile`，否则尝试 `SSH_AUTH_SOCK`
 - 远端访问走 SFTP，不再依赖远端 `find` / `cat`
-- Windows 桌面版如果需要 Alias/Key 解析，建议启用系统内置 OpenSSH Client
+- 这样可以避免读取本机 SSH 配置带来的权限和安全边界问题
 
 ## 本地运行
 
@@ -71,14 +70,15 @@ npm run desktop:dist
 
 ## 使用方式
 
-1. 在界面中填写 `Host / SSH Alias`，或者直接从 `~/.ssh/config` 选择
+1. 先在界面中手动填写连接信息，或保存为应用内配置
 2. 选择认证方式：`SSH Key` 或 `Password`
 3. 如有需要再填 `Username` 和 `Port`
 4. 填写远端目录 `Root Path`
-5. 点击“连接并读取目录”
-6. 左侧进入目录，可上传本地文件到当前目录
-7. 选择远端文件后，可在右侧预览或直接下载
-8. 对 PDF、图片、HTML、文本内容可在右侧预览区进行缩放
+5. `SSH Key` 模式下粘贴私钥内容，或导入私钥文件
+6. 点击“连接并读取目录”
+7. 左侧进入目录，可上传本地文件到当前目录
+8. 选择远端文件后，可在右侧预览或直接下载
+9. 对 PDF、图片、HTML、文本内容可在右侧预览区进行缩放
 
 ## 后续建议
 

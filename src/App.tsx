@@ -13,11 +13,10 @@ import { PdfPreview } from "./components/PdfPreview";
 import { TextPreview } from "./components/TextPreview";
 import type {
   ActiveSession,
-  ConfiguredSshHost,
   ConnectionConfig,
   ConnectionSessionResponse,
   RemoteEntry,
-  ResolvedSshHost
+  SavedConnectionProfile
 } from "./types";
 
 type ThemeMode = "light" | "dark";
@@ -26,6 +25,7 @@ const defaultForm: ConnectionConfig = {
   authMethod: "key",
   host: "",
   password: "",
+  privateKey: "",
   port: "22",
   rememberPassword: true,
   rootPath: "/",
@@ -284,20 +284,22 @@ function formatEntrySummary(entry: RemoteEntry): string {
 
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const privateKeyFileInputRef = useRef<HTMLInputElement | null>(null);
   const [form, setForm] = useState(defaultForm);
   const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
-  const [configuredHosts, setConfiguredHosts] = useState<ConfiguredSshHost[]>([]);
+  const [savedProfiles, setSavedProfiles] = useState<SavedConnectionProfile[]>(
+    []
+  );
   const [currentDir, setCurrentDir] = useState("");
   const [entries, setEntries] = useState<RemoteEntry[]>([]);
   const [selectedFile, setSelectedFile] = useState<RemoteEntry | null>(null);
-  const [selectedAlias, setSelectedAlias] = useState("");
-  const [resolvedHost, setResolvedHost] = useState<ResolvedSshHost | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState("");
   const [error, setError] = useState("");
-  const [hostsError, setHostsError] = useState("");
+  const [profilesError, setProfilesError] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [isLoadingDir, setIsLoadingDir] = useState(false);
-  const [isLoadingHosts, setIsLoadingHosts] = useState(false);
+  const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [fitToWidth, setFitToWidth] = useState(true);
   const [pathDraft, setPathDraft] = useState(defaultForm.rootPath);
@@ -311,7 +313,7 @@ export default function App() {
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
-    void loadConfiguredHosts();
+    void loadSavedProfiles();
   }, []);
 
   useEffect(() => {
@@ -354,49 +356,150 @@ export default function App() {
     });
   }, [form.authMethod, form.host, form.username]);
 
-  async function loadConfiguredHosts() {
-    setIsLoadingHosts(true);
-    setHostsError("");
+  async function loadSavedProfiles(nextSelectedProfileId?: string) {
+    setIsLoadingProfiles(true);
+    setProfilesError("");
 
     try {
-      const payload = await requestJson<{ hosts: ConfiguredSshHost[] }>(
-        "/api/ssh/hosts"
+      const payload = await requestJson<{ profiles: SavedConnectionProfile[] }>(
+        "/api/profiles"
       );
-      setConfiguredHosts(payload.hosts);
+      setSavedProfiles(payload.profiles);
+
+      if (typeof nextSelectedProfileId === "string") {
+        setSelectedProfileId(
+          payload.profiles.some((profile) => profile.id === nextSelectedProfileId)
+            ? nextSelectedProfileId
+            : ""
+        );
+      }
     } catch (loadError) {
-      setHostsError(
-        loadError instanceof Error ? loadError.message : "SSH 配置读取失败"
+      setProfilesError(
+        loadError instanceof Error ? loadError.message : "应用内 SSH 配置读取失败"
       );
     } finally {
-      setIsLoadingHosts(false);
+      setIsLoadingProfiles(false);
     }
   }
 
-  async function applyConfiguredHost(alias: string) {
-    setSelectedAlias(alias);
-    setHostsError("");
+  function applySavedProfile(profileId: string) {
+    setSelectedProfileId(profileId);
+    setProfilesError("");
 
-    if (!alias) {
-      setResolvedHost(null);
+    const profile = savedProfiles.find((item) => item.id === profileId);
+
+    if (!profile) {
+      return;
+    }
+
+    setForm((value) => ({
+      ...value,
+      authMethod: profile.authMethod,
+      host: profile.host,
+      password:
+        profile.authMethod === "password"
+          ? readStoredPassword(profile.host, profile.username) || ""
+          : "",
+      privateKey: profile.privateKey,
+      port: profile.port,
+      rootPath: profile.rootPath,
+      username: profile.username
+    }));
+    setPathDraft(profile.rootPath);
+  }
+
+  async function saveCurrentProfile() {
+    const suggestedName =
+      savedProfiles.find((profile) => profile.id === selectedProfileId)?.name ||
+      (form.username && form.host
+        ? `${form.username}@${form.host}`
+        : form.host || "新连接");
+    const name = window.prompt("给这条连接配置起个名字", suggestedName)?.trim();
+
+    if (!name) {
+      return;
+    }
+
+    setProfilesError("");
+
+    try {
+      const payload = await requestJson<{ profile: SavedConnectionProfile }>(
+        "/api/profiles",
+        {
+          body: JSON.stringify({
+            authMethod: form.authMethod,
+            host: form.host,
+            id: selectedProfileId || undefined,
+            name,
+            port: form.port,
+            privateKey: form.authMethod === "key" ? form.privateKey : "",
+            rootPath: form.rootPath,
+            username: form.username
+          }),
+          headers: {
+            "Content-Type": "application/json"
+          },
+          method: "POST"
+        }
+      );
+
+      await loadSavedProfiles(payload.profile.id);
+    } catch (saveError) {
+      setProfilesError(
+        saveError instanceof Error ? saveError.message : "应用内 SSH 配置保存失败"
+      );
+    }
+  }
+
+  async function deleteSavedProfile() {
+    const targetProfile = savedProfiles.find(
+      (profile) => profile.id === selectedProfileId
+    );
+
+    if (!targetProfile) {
+      return;
+    }
+
+    if (!window.confirm(`删除应用内配置“${targetProfile.name}”？`)) {
+      return;
+    }
+
+    setProfilesError("");
+
+    try {
+      await requestJson(
+        `/api/profiles/${encodeURIComponent(targetProfile.id)}`,
+        {
+          method: "DELETE"
+        }
+      );
+
+      await loadSavedProfiles("");
+    } catch (deleteError) {
+      setProfilesError(
+        deleteError instanceof Error ? deleteError.message : "应用内 SSH 配置删除失败"
+      );
+    }
+  }
+
+  async function handlePrivateKeyFileChange(
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
       return;
     }
 
     try {
-      const payload = await requestJson<ResolvedSshHost>(
-        `/api/ssh/resolve?alias=${encodeURIComponent(alias)}`
-      );
-
-      setResolvedHost(payload);
+      const privateKey = await file.text();
       setForm((value) => ({
         ...value,
-        host: alias,
-        port: payload.port || value.port || "22",
-        username: payload.user || value.username
+        privateKey
       }));
-    } catch (loadError) {
-      setHostsError(
-        loadError instanceof Error ? loadError.message : "SSH 配置解析失败"
-      );
+      setError("");
+    } finally {
+      event.target.value = "";
     }
   }
 
@@ -501,6 +604,8 @@ export default function App() {
             host: form.host,
             password:
               form.authMethod === "password" ? form.password : undefined,
+            privateKey:
+              form.authMethod === "key" ? form.privateKey : undefined,
             port: form.port,
             username: form.username
           }),
@@ -713,23 +818,18 @@ export default function App() {
         ? "当前筛选条件下没有匹配项"
         : "当前目录只有点文件，关闭“隐藏点文件”后可查看"
       : "当前目录没有文件";
-  const selectedConfiguredHost = configuredHosts.find(
-    (item) => item.alias === selectedAlias
+  const selectedProfile = savedProfiles.find(
+    (profile) => profile.id === selectedProfileId
   );
-  const resolvedSummary = resolvedHost
-    ? [
-        resolvedHost.user ? `${resolvedHost.user}@` : "",
-        resolvedHost.hostname || resolvedHost.alias,
-        resolvedHost.port ? `:${resolvedHost.port}` : ""
-      ].join("")
-    : "";
   const sessionSummary = activeSession
     ? `${activeSession.username}@${activeSession.hostname}:${activeSession.port}`
     : "";
   const isBusy = isConnecting || isLoadingDir;
   const connectionSummary = activeSession
     ? sessionSummary
-    : "先填写 SSH 连接信息，再读取远程目录";
+    : selectedProfile
+      ? `已选择配置：${selectedProfile.name}`
+      : "先填写 SSH 连接信息，再读取远程目录";
   const browserPathLabel = currentDir || "-";
   const selectedFilePath = selectedFile ? selectedFile.path : "尚未选择文件";
   const passwordStatus = form.authMethod !== "password"
@@ -769,7 +869,7 @@ export default function App() {
               </div>
             </div>
             <p className="topbar-note">
-            通过 `ssh2` 建立远程会话，支持密码或 SSH Key 登录，可在当前目录上传本地文件、下载远程文件，并预览 PDF、图片、HTML 与文本内容。
+            通过 `ssh2` 建立远程会话，连接配置和 SSH Key 由应用自己管理，不再依赖本机 `.ssh` 配置；同时支持上传、下载和多种文件预览。
             </p>
           </div>
         </header>
@@ -802,30 +902,30 @@ export default function App() {
             {!isConnectionPanelCollapsed ? (
               <>
                 <label>
-                  <span>已配置主机</span>
+                  <span>应用内配置</span>
                   <div className="connection-actions">
                     <select
                       onChange={(event) => {
-                        void applyConfiguredHost(event.target.value);
+                        applySavedProfile(event.target.value);
                       }}
-                      value={selectedAlias}
+                      value={selectedProfileId}
                     >
                       <option value="">
-                        {isLoadingHosts
-                          ? "正在读取 ~/.ssh/config"
-                          : configuredHosts.length
-                            ? "从 ~/.ssh/config 选择 Host"
-                            : "未发现可用 Host，仍可手动输入"}
+                        {isLoadingProfiles
+                          ? "正在读取应用内配置"
+                          : savedProfiles.length
+                            ? "选择已保存连接配置"
+                            : "还没有保存的连接配置"}
                       </option>
-                      {configuredHosts.map((item) => (
-                        <option key={item.alias} value={item.alias}>
-                          {item.alias}
+                      {savedProfiles.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
                         </option>
                       ))}
                     </select>
                     <button
                       onClick={() => {
-                        void loadConfiguredHosts();
+                        void loadSavedProfiles(selectedProfileId);
                       }}
                       type="button"
                     >
@@ -833,18 +933,28 @@ export default function App() {
                     </button>
                   </div>
                 </label>
+                <div className="connection-actions">
+                  <button onClick={() => void saveCurrentProfile()} type="button">
+                    保存配置
+                  </button>
+                  <button
+                    disabled={!selectedProfileId}
+                    onClick={() => void deleteSavedProfile()}
+                    type="button"
+                  >
+                    删除配置
+                  </button>
+                </div>
                 <label>
-                  <span>Host / SSH Alias</span>
+                  <span>Host</span>
                   <input
-                    onChange={(event) => {
-                      setSelectedAlias("");
-                      setResolvedHost(null);
+                    onChange={(event) =>
                       setForm((value) => ({
                         ...value,
                         host: event.target.value
-                      }));
-                    }}
-                    placeholder="server-01"
+                      }))
+                    }
+                    placeholder="server-01.example.com"
                     type="text"
                     value={form.host}
                   />
@@ -932,7 +1042,55 @@ export default function App() {
                       <span>把密码保存在本机浏览器</span>
                     </label>
                   </>
-                ) : null}
+                ) : (
+                  <>
+                    <label>
+                      <span>Private Key</span>
+                      <textarea
+                        className="multiline-input"
+                        onChange={(event) =>
+                          setForm((value) => ({
+                            ...value,
+                            privateKey: event.target.value
+                          }))
+                        }
+                        placeholder="粘贴 OpenSSH 私钥内容"
+                        rows={8}
+                        value={form.privateKey}
+                      />
+                      <div className="connection-actions">
+                        <button
+                          onClick={() => privateKeyFileInputRef.current?.click()}
+                          type="button"
+                        >
+                          导入私钥文件
+                        </button>
+                        <button
+                          disabled={!form.privateKey}
+                          onClick={() =>
+                            setForm((value) => ({
+                              ...value,
+                              privateKey: ""
+                            }))
+                          }
+                          type="button"
+                        >
+                          清空
+                        </button>
+                      </div>
+                      <small className="field-note">
+                        只使用应用内维护的 SSH Key，不再读取本机
+                        `~/.ssh/config`、IdentityFile 或 SSH Agent。
+                      </small>
+                    </label>
+                    <input
+                      className="hidden-file-input"
+                      onChange={handlePrivateKeyFileChange}
+                      ref={privateKeyFileInputRef}
+                      type="file"
+                    />
+                  </>
+                )}
                 <label>
                   <span>Root Path</span>
                   <input
@@ -979,24 +1137,27 @@ export default function App() {
                   </button>
                 </div>
                 <p className="hint">
-                  网页会读取本机 `~/.ssh/config` 的 Host Alias。密码模式下可把密码保存在本机浏览器 `localStorage`，共用电脑时不建议开启。
+                  应用内配置会单独保存在 `~/.remote-viewer/profiles.json`，
+                  与本机 `.ssh` 配置隔离。密码模式下仍可把密码保存在本机浏览器
+                  `localStorage`，共用电脑时不建议开启。
                 </p>
               </>
             ) : null}
-            {hostsError ? <div className="panel-error">{hostsError}</div> : null}
+            {profilesError ? <div className="panel-error">{profilesError}</div> : null}
             {error ? <div className="panel-error">{error}</div> : null}
-            {resolvedHost ? (
+            {selectedProfile ? (
               <div className="config-summary">
-                <strong>{resolvedHost.alias}</strong>
-                <span>{resolvedSummary}</span>
-                {resolvedHost.identityFiles.length ? (
-                  <small>
-                    Key: {resolvedHost.identityFiles[0]}
-                  </small>
-                ) : null}
-                {selectedConfiguredHost ? (
-                  <small>{selectedConfiguredHost.source}</small>
-                ) : null}
+                <strong>{selectedProfile.name}</strong>
+                <span>
+                  {selectedProfile.username}@{selectedProfile.host}:
+                  {selectedProfile.port}
+                </span>
+                <small>
+                  {selectedProfile.authMethod === "password"
+                    ? "Password"
+                    : "SSH Key"}
+                </small>
+                <small>{selectedProfile.rootPath}</small>
               </div>
             ) : null}
             {activeSession ? (
