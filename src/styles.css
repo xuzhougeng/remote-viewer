@@ -284,12 +284,19 @@ select {
 }
 
 .workspace {
+  --sidebar-width: 380px;
   display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(320px, var(--sidebar-width)) 16px minmax(0, 1fr);
+  gap: 0;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.workspace.is-resizing,
+.workspace.is-resizing * {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .sidebar,
@@ -299,6 +306,44 @@ select {
   gap: 14px;
   min-height: 0;
   overflow: hidden;
+}
+
+.workspace-resizer-shell {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.workspace-resizer {
+  width: 10px;
+  border-radius: 999px;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  position: relative;
+  outline: none;
+}
+
+.workspace-resizer::before {
+  content: "";
+  position: absolute;
+  inset: 6px 3px;
+  border-radius: inherit;
+  background: var(--color-table-border);
+  transition:
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.workspace-resizer:hover::before,
+.workspace-resizer:focus-visible::before,
+.workspace.is-resizing .workspace-resizer::before {
+  background: linear-gradient(
+    180deg,
+    var(--color-primary-start) 0%,
+    var(--color-primary-end) 100%
+  );
+  transform: scaleX(1.15);
 }
 
 .panel {
@@ -1162,6 +1207,10 @@ select {
 
   .workspace {
     overflow: visible;
+  }
+
+  .workspace-resizer-shell {
+    display: none;
   }
 
   .viewer-panel {

@@ -1,6 +1,9 @@
 import {
+  type CSSProperties,
   ChangeEvent,
   FormEvent,
+  type KeyboardEvent,
+  type PointerEvent,
   useEffect,
   useMemo,
   useRef,
@@ -36,7 +39,11 @@ const defaultForm: ConnectionConfig = {
 };
 
 const passwordStoragePrefix = "remote-viewer.password.";
+const sidebarWidthStorageKey = "remote-viewer.sidebar-width";
 const themeStorageKey = "remote-viewer.theme";
+const defaultSidebarWidth = 380;
+const minSidebarWidth = 320;
+const maxSidebarWidth = 720;
 const knownTextExtensions = new Set([
   "c",
   "cc",
@@ -271,6 +278,32 @@ function removeStoredPassword(host: string, username: string): void {
   window.localStorage.removeItem(key);
 }
 
+function clampSidebarWidth(
+  width: number,
+  viewportWidth = Number.POSITIVE_INFINITY
+): number {
+  const safeWidth = Number.isFinite(width) ? width : defaultSidebarWidth;
+  const maxWidthForViewport = Math.max(
+    minSidebarWidth,
+    Math.min(maxSidebarWidth, viewportWidth - 360)
+  );
+
+  return Math.round(
+    Math.min(Math.max(safeWidth, minSidebarWidth), maxWidthForViewport)
+  );
+}
+
+function readStoredSidebarWidth(): number {
+  const rawValue = window.localStorage.getItem(sidebarWidthStorageKey);
+  const parsedValue = Number(rawValue || "");
+
+  if (!Number.isFinite(parsedValue)) {
+    return clampSidebarWidth(defaultSidebarWidth, window.innerWidth);
+  }
+
+  return clampSidebarWidth(parsedValue, window.innerWidth);
+}
+
 function readStoredTheme(): ThemeMode {
   const storedTheme = window.localStorage.getItem(themeStorageKey);
   return storedTheme === "dark" ? "dark" : "light";
@@ -352,7 +385,13 @@ export default function App() {
   const privateKeyFileInputRef = useRef<HTMLInputElement | null>(null);
   const downloadAbortControllerRef = useRef<AbortController | null>(null);
   const downloadRequestIdRef = useRef(0);
+  const sidebarResizeStateRef = useRef<{
+    pointerId: number;
+    startWidth: number;
+    startX: number;
+  } | null>(null);
   const [form, setForm] = useState(defaultForm);
+  const [sidebarWidth, setSidebarWidth] = useState(() => readStoredSidebarWidth());
   const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
   const [viewerMode, setViewerMode] = useState<ViewerMode>("preview");
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
@@ -392,9 +431,81 @@ export default function App() {
   );
   const [isDownloadFeedbackDismissed, setIsDownloadFeedbackDismissed] =
     useState(false);
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [isConnectionPanelCollapsed, setIsConnectionPanelCollapsed] =
     useState(false);
   const [isPending, startTransition] = useTransition();
+
+  function updateSidebarWidth(nextWidth: number) {
+    setSidebarWidth(clampSidebarWidth(nextWidth, window.innerWidth));
+  }
+
+  function handleSidebarResizeStart(event: PointerEvent<HTMLDivElement>) {
+    if (window.innerWidth <= 980) {
+      return;
+    }
+
+    event.preventDefault();
+    sidebarResizeStateRef.current = {
+      pointerId: event.pointerId,
+      startWidth: sidebarWidth,
+      startX: event.clientX
+    };
+    setIsResizingSidebar(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleSidebarResizeMove(event: PointerEvent<HTMLDivElement>) {
+    const activeResize = sidebarResizeStateRef.current;
+
+    if (!activeResize || activeResize.pointerId !== event.pointerId) {
+      return;
+    }
+
+    updateSidebarWidth(
+      activeResize.startWidth + event.clientX - activeResize.startX
+    );
+  }
+
+  function handleSidebarResizeEnd(event: PointerEvent<HTMLDivElement>) {
+    const activeResize = sidebarResizeStateRef.current;
+
+    if (!activeResize || activeResize.pointerId !== event.pointerId) {
+      return;
+    }
+
+    sidebarResizeStateRef.current = null;
+    setIsResizingSidebar(false);
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleSidebarResizeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      updateSidebarWidth(sidebarWidth - 24);
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      updateSidebarWidth(sidebarWidth + 24);
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      updateSidebarWidth(minSidebarWidth);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      updateSidebarWidth(maxSidebarWidth);
+    }
+  }
 
   function abortActiveDownload() {
     const controller = downloadAbortControllerRef.current;
@@ -438,6 +549,24 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem(themeStorageKey, theme);
   }, [theme]);
+
+  useEffect(() => {
+    window.localStorage.setItem(sidebarWidthStorageKey, String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    const handleWindowResize = () => {
+      setSidebarWidth((currentWidth) =>
+        clampSidebarWidth(currentWidth, window.innerWidth)
+      );
+    };
+
+    window.addEventListener("resize", handleWindowResize);
+
+    return () => {
+      window.removeEventListener("resize", handleWindowResize);
+    };
+  }, []);
 
   useEffect(() => {
     if (form.authMethod !== "password") {
@@ -1226,7 +1355,14 @@ export default function App() {
           </div>
         </header>
 
-      <main className="workspace">
+      <main
+        className={`workspace ${isResizingSidebar ? "is-resizing" : ""}`}
+        style={
+          {
+            "--sidebar-width": `${sidebarWidth}px`
+          } as CSSProperties
+        }
+      >
         <section className="sidebar">
           <form
             className={`panel connection-panel light-panel ${
@@ -1644,7 +1780,7 @@ export default function App() {
                       {formatEntryBadge(entry)}
                     </span>
                     <span className="file-meta">
-                      <strong>{entry.name}</strong>
+                      <strong title={entry.name}>{entry.name}</strong>
                       <small>{formatEntrySummary(entry)}</small>
                     </span>
                   </button>
@@ -1653,6 +1789,24 @@ export default function App() {
             </div>
           </section>
         </section>
+
+        <div className="workspace-resizer-shell">
+          <div
+            aria-label="调整左侧文件区宽度"
+            aria-orientation="vertical"
+            aria-valuemax={maxSidebarWidth}
+            aria-valuemin={minSidebarWidth}
+            aria-valuenow={sidebarWidth}
+            className="workspace-resizer"
+            onKeyDown={handleSidebarResizeKeyDown}
+            onPointerCancel={handleSidebarResizeEnd}
+            onPointerDown={handleSidebarResizeStart}
+            onPointerMove={handleSidebarResizeMove}
+            onPointerUp={handleSidebarResizeEnd}
+            role="separator"
+            tabIndex={0}
+          />
+        </div>
 
         <section className="viewer-column">
           <div className="panel viewer-toolbar light-panel">
