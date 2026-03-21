@@ -83,6 +83,7 @@ type SavedConnectionProfile = {
   name: string;
   port: string;
   privateKey: string;
+  rememberPassword: boolean;
   rootPath: string;
   updatedAt: number;
   username: string;
@@ -155,12 +156,21 @@ function readSavedConnectionProfiles(): SavedConnectionProfile[] {
     const payload = JSON.parse(raw) as { profiles?: SavedConnectionProfile[] };
     const profiles = Array.isArray(payload.profiles) ? payload.profiles : [];
 
-    return profiles.sort((left, right) =>
-      left.name.localeCompare(right.name, "zh-CN", {
-        numeric: true,
-        sensitivity: "base"
-      })
-    );
+    return profiles
+      .map((profile) => ({
+        ...profile,
+        rememberPassword:
+          profile.authMethod === "password" &&
+          typeof profile.rememberPassword === "boolean"
+            ? profile.rememberPassword
+            : false
+      }))
+      .sort((left, right) =>
+        left.name.localeCompare(right.name, "zh-CN", {
+          numeric: true,
+          sensitivity: "base"
+        })
+      );
   } catch (error) {
     throw asAppError(error, "应用内 SSH 配置读取失败");
   }
@@ -189,6 +199,8 @@ function normalizeSavedConnectionProfile(
   const username = String(payload.username || "").trim();
   const rootPath = String(payload.rootPath || "/").trim() || "/";
   const privateKey = String(payload.privateKey || "");
+  const rememberPassword =
+    authMethod === "password" && payload.rememberPassword === true;
   const id = String(payload.id || "").trim() || undefined;
 
   if (!name) {
@@ -214,6 +226,7 @@ function normalizeSavedConnectionProfile(
     name,
     port,
     privateKey: authMethod === "key" ? privateKey : "",
+    rememberPassword,
     rootPath,
     username
   };

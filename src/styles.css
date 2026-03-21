@@ -592,6 +592,36 @@ select {
   background: var(--color-surface-soft);
 }
 
+.download-feedback-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.download-feedback-header > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.download-feedback-error strong {
+  color: var(--color-text-strong);
+  font-size: 0.9rem;
+}
+
+.download-feedback-close {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.76rem;
+  background: transparent;
+  box-shadow: none;
+  color: var(--color-text-soft);
+}
+
+.download-feedback-close:hover:not(:disabled) {
+  background: var(--color-button-bg);
+  box-shadow: none;
+  transform: none;
+}
+
 .download-progress-meta {
   display: flex;
   align-items: flex-start;

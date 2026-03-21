@@ -390,6 +390,8 @@ export default function App() {
   const [downloadEtaSeconds, setDownloadEtaSeconds] = useState<number | null>(
     null
   );
+  const [isDownloadFeedbackDismissed, setIsDownloadFeedbackDismissed] =
+    useState(false);
   const [isConnectionPanelCollapsed, setIsConnectionPanelCollapsed] =
     useState(false);
   const [isPending, startTransition] = useTransition();
@@ -410,6 +412,7 @@ export default function App() {
     setDownloadError("");
     setDownloadSpeedBytesPerSecond(null);
     setDownloadEtaSeconds(null);
+    setIsDownloadFeedbackDismissed(false);
   }
 
   function stopDownload(options?: { reset?: boolean }) {
@@ -524,6 +527,8 @@ export default function App() {
           : "",
       privateKey: profile.privateKey,
       port: profile.port,
+      rememberPassword:
+        profile.authMethod === "password" ? profile.rememberPassword : false,
       rootPath: profile.rootPath,
       username: profile.username
     }));
@@ -531,8 +536,11 @@ export default function App() {
   }
 
   async function saveCurrentProfile() {
+    const previousProfile = savedProfiles.find(
+      (profile) => profile.id === selectedProfileId
+    );
     const suggestedName =
-      savedProfiles.find((profile) => profile.id === selectedProfileId)?.name ||
+      previousProfile?.name ||
       (form.username && form.host
         ? `${form.username}@${form.host}`
         : form.host || "新连接");
@@ -555,6 +563,8 @@ export default function App() {
             name,
             port: form.port,
             privateKey: form.authMethod === "key" ? form.privateKey : "",
+            rememberPassword:
+              form.authMethod === "password" ? form.rememberPassword : false,
             rootPath: form.rootPath,
             username: form.username
           }),
@@ -564,6 +574,32 @@ export default function App() {
           method: "POST"
         }
       );
+
+      if (previousProfile?.authMethod === "password") {
+        const hasPasswordKeyChanged =
+          previousProfile.host !== payload.profile.host ||
+          previousProfile.username !== payload.profile.username;
+
+        if (
+          payload.profile.authMethod !== "password" ||
+          !payload.profile.rememberPassword ||
+          hasPasswordKeyChanged
+        ) {
+          removeStoredPassword(previousProfile.host, previousProfile.username);
+        }
+      }
+
+      if (payload.profile.authMethod === "password") {
+        if (payload.profile.rememberPassword && form.password) {
+          saveStoredPassword(
+            payload.profile.host,
+            payload.profile.username,
+            form.password
+          );
+        } else {
+          removeStoredPassword(payload.profile.host, payload.profile.username);
+        }
+      }
 
       await loadSavedProfiles(payload.profile.id);
     } catch (saveError) {
@@ -876,6 +912,7 @@ export default function App() {
 
     downloadRequestIdRef.current = requestId;
     downloadAbortControllerRef.current = controller;
+    setIsDownloadFeedbackDismissed(false);
     setIsDownloading(true);
     setDownloadStatus("downloading");
     setDownloadError("");
@@ -1113,6 +1150,9 @@ export default function App() {
     downloadTotalBytes && downloadTotalBytes > 0
       ? Math.min(downloadLoadedBytes / downloadTotalBytes, 1) * 100
       : null;
+  const shouldShowDownloadFeedback =
+    !isDownloadFeedbackDismissed &&
+    (Boolean(downloadError) || downloadStatus !== "idle");
   const downloadProgressLabel = downloadTotalBytes
     ? `${formatSize(downloadLoadedBytes)} / ${formatSize(downloadTotalBytes)}`
     : downloadLoadedBytes
@@ -1453,7 +1493,7 @@ export default function App() {
                 <p className="hint">
                   应用内配置会单独保存在 `~/.remote-viewer/profiles.json`，
                   与本机 `.ssh` 配置隔离。密码模式下仍可把密码保存在本机浏览器
-                  `localStorage`，共用电脑时不建议开启。
+                  `localStorage`；保存配置时会同步这个缓存，共用电脑时不建议开启。
                 </p>
               </>
             ) : null}
@@ -1705,41 +1745,65 @@ export default function App() {
                 <span className="viewer-mode-note">命令在当前目录执行</span>
               )}
             </div>
-            {downloadError ? (
-              <div className="download-feedback panel-error">
-                {downloadError}
-              </div>
-            ) : null}
-            {!downloadError && downloadStatus !== "idle" ? (
-              <div className="download-feedback">
-                <div className="download-progress-meta">
-                  <div className="download-progress-copy">
-                    <strong>
-                      {downloadStatusLabel}
-                      {downloadFileName ? ` · ${downloadFileName}` : ""}
-                    </strong>
-                    {downloadDetailLabel ? <small>{downloadDetailLabel}</small> : null}
+            {shouldShowDownloadFeedback ? (
+              downloadError ? (
+                <div className="download-feedback download-feedback-error">
+                  <div className="download-feedback-header">
+                    <strong>下载失败</strong>
+                    <button
+                      aria-label="关闭下载反馈"
+                      className="download-feedback-close"
+                      onClick={() => setIsDownloadFeedbackDismissed(true)}
+                      type="button"
+                    >
+                      关闭
+                    </button>
                   </div>
-                  <span>{downloadProgressLabel}</span>
+                  <div>{downloadError}</div>
                 </div>
-                <div className="download-progress-track" aria-hidden="true">
-                  <div
-                    className={`download-progress-fill ${
-                      downloadProgressPercent === null &&
-                      downloadStatus === "downloading"
-                        ? "is-indeterminate"
-                        : ""
-                    }`}
-                    style={
-                      downloadProgressPercent === null
-                        ? undefined
-                        : {
-                            width: `${downloadProgressPercent}%`
-                          }
-                    }
-                  />
+              ) : (
+                <div className="download-feedback">
+                  <div className="download-feedback-header">
+                    <div className="download-progress-meta">
+                      <div className="download-progress-copy">
+                        <strong>
+                          {downloadStatusLabel}
+                          {downloadFileName ? ` · ${downloadFileName}` : ""}
+                        </strong>
+                        {downloadDetailLabel ? (
+                          <small>{downloadDetailLabel}</small>
+                        ) : null}
+                      </div>
+                      <span>{downloadProgressLabel}</span>
+                    </div>
+                    <button
+                      aria-label="关闭下载反馈"
+                      className="download-feedback-close"
+                      onClick={() => setIsDownloadFeedbackDismissed(true)}
+                      type="button"
+                    >
+                      关闭
+                    </button>
+                  </div>
+                  <div className="download-progress-track" aria-hidden="true">
+                    <div
+                      className={`download-progress-fill ${
+                        downloadProgressPercent === null &&
+                        downloadStatus === "downloading"
+                          ? "is-indeterminate"
+                          : ""
+                      }`}
+                      style={
+                        downloadProgressPercent === null
+                          ? undefined
+                          : {
+                              width: `${downloadProgressPercent}%`
+                            }
+                      }
+                    />
+                  </div>
                 </div>
-              </div>
+              )
             ) : null}
           </div>
 

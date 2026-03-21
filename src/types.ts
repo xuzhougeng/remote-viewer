@@ -45,6 +45,7 @@ export type SavedConnectionProfile = {
   name: string;
   port: string;
   privateKey: string;
+  rememberPassword: boolean;
   rootPath: string;
   username: string;
 };
