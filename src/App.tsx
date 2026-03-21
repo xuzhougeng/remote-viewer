@@ -402,8 +402,10 @@ export default function App() {
   const [entries, setEntries] = useState<RemoteEntry[]>([]);
   const [selectedFile, setSelectedFile] = useState<RemoteEntry | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [profileNameDraft, setProfileNameDraft] = useState("");
   const [error, setError] = useState("");
   const [profilesError, setProfilesError] = useState("");
+  const [profilesNotice, setProfilesNotice] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [isLoadingDir, setIsLoadingDir] = useState(false);
   const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
@@ -621,11 +623,14 @@ export default function App() {
       setSavedProfiles(payload.profiles);
 
       if (typeof nextSelectedProfileId === "string") {
+        const nextSelectedProfile =
+          payload.profiles.find((profile) => profile.id === nextSelectedProfileId) ||
+          null;
+
         setSelectedProfileId(
-          payload.profiles.some((profile) => profile.id === nextSelectedProfileId)
-            ? nextSelectedProfileId
-            : ""
+          nextSelectedProfile ? nextSelectedProfileId : ""
         );
+        setProfileNameDraft(nextSelectedProfile?.name || "");
       }
     } catch (loadError) {
       setProfilesError(
@@ -639,13 +644,16 @@ export default function App() {
   function applySavedProfile(profileId: string) {
     setSelectedProfileId(profileId);
     setProfilesError("");
+    setProfilesNotice("");
 
     const profile = savedProfiles.find((item) => item.id === profileId);
 
     if (!profile) {
+      setProfileNameDraft("");
       return;
     }
 
+    setProfileNameDraft(profile.name);
     setForm((value) => ({
       ...value,
       authMethod: profile.authMethod,
@@ -673,13 +681,16 @@ export default function App() {
       (form.username && form.host
         ? `${form.username}@${form.host}`
         : form.host || "新连接");
-    const name = window.prompt("给这条连接配置起个名字", suggestedName)?.trim();
+    const name = profileNameDraft.trim() || suggestedName;
 
     if (!name) {
+      setProfilesNotice("");
+      setProfilesError("请填写配置名称");
       return;
     }
 
     setProfilesError("");
+    setProfilesNotice("");
 
     try {
       const payload = await requestJson<{ profile: SavedConnectionProfile }>(
@@ -730,6 +741,8 @@ export default function App() {
         }
       }
 
+      setProfileNameDraft(payload.profile.name);
+      setProfilesNotice(`已保存配置：${payload.profile.name}`);
       await loadSavedProfiles(payload.profile.id);
     } catch (saveError) {
       setProfilesError(
@@ -752,6 +765,7 @@ export default function App() {
     }
 
     setProfilesError("");
+    setProfilesNotice("");
 
     try {
       await requestJson(
@@ -761,6 +775,8 @@ export default function App() {
         }
       );
 
+      setProfileNameDraft("");
+      setProfilesNotice(`已删除配置：${targetProfile.name}`);
       await loadSavedProfiles("");
     } catch (deleteError) {
       setProfilesError(
@@ -1256,6 +1272,11 @@ export default function App() {
   const selectedProfile = savedProfiles.find(
     (profile) => profile.id === selectedProfileId
   );
+  const suggestedProfileName =
+    selectedProfile?.name ||
+    (form.username && form.host
+      ? `${form.username}@${form.host}`
+      : form.host || "新连接");
   const viewerTitle = viewerMode === "terminal" ? "终端区" : "预览区";
   const sessionSummary = activeSession
     ? `${activeSession.username}@${activeSession.hostname}:${activeSession.port}`
@@ -1420,6 +1441,19 @@ export default function App() {
                       刷新
                     </button>
                   </div>
+                </label>
+                <label>
+                  <span>配置名称</span>
+                  <input
+                    onChange={(event) => {
+                      setProfileNameDraft(event.target.value);
+                      setProfilesError("");
+                      setProfilesNotice("");
+                    }}
+                    placeholder={suggestedProfileName}
+                    type="text"
+                    value={profileNameDraft}
+                  />
                 </label>
                 <div className="connection-actions">
                   <button onClick={() => void saveCurrentProfile()} type="button">
@@ -1632,6 +1666,9 @@ export default function App() {
                   `localStorage`；保存配置时会同步这个缓存，共用电脑时不建议开启。
                 </p>
               </>
+            ) : null}
+            {profilesNotice ? (
+              <div className="transfer-feedback">{profilesNotice}</div>
             ) : null}
             {profilesError ? <div className="panel-error">{profilesError}</div> : null}
             {error ? <div className="panel-error">{error}</div> : null}
