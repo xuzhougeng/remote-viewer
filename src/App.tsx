@@ -1770,8 +1770,6 @@ export default function App() {
                       }
 
                       setSelectedFile(entry);
-                      setZoom(1);
-                      setFitToWidth(true);
                       setViewerMode("preview");
                     }}
                     type="button"
@@ -1870,6 +1868,13 @@ export default function App() {
                     type="button"
                   >
                     缩小
+                  </button>
+                  <button
+                    disabled={!selectedFile}
+                    onClick={() => setZoom(0.5)}
+                    type="button"
+                  >
+                    50%
                   </button>
                   <button
                     disabled={!selectedFile}
